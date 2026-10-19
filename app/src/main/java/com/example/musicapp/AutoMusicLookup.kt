@@ -1,0 +1,68 @@
+package com.example.musicapp
+
+import android.content.Context
+import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URLEncoder
+import java.net.URL
+
+/** Online lookups are deliberately opt-in: they require an active internet connection. */
+data class OnlineSongInfo(
+    val title: String, val artist: String, val album: String,
+    val genre: String, val year: String, val artworkUrl: String
+)
+data class LyricsLine(val timeMs: Long, val text: String)
+
+object AutoMusicLookup {
+    private fun get(url: String): String {
+        val c = (URL(url).openConnection() as HttpURLConnection)
+        c.connectTimeout = 7000; c.readTimeout = 7000
+        c.setRequestProperty("User-Agent", "MusicApp/1.1 (Android)")
+        return try { c.inputStream.bufferedReader().use { it.readText() } } finally { c.disconnect() }
+    }
+
+    suspend fun songInfo(title: String, artist: String): OnlineSongInfo? = withContext(Dispatchers.IO) {
+        try {
+            val q = URLEncoder.encode("$title $artist", "UTF-8")
+            val root = JSONObject(get("https://itunes.apple.com/search?term=$q&entity=song&limit=5"))
+            val arr = root.optJSONArray("results") ?: return@withContext null
+            if (arr.length() == 0) return@withContext null
+            val target = (0 until arr.length()).map { arr.getJSONObject(it) }.firstOrNull {
+                it.optString("trackName").contains(title, true) || it.optString("artistName").contains(artist, true)
+            } ?: arr.getJSONObject(0)
+            OnlineSongInfo(
+                target.optString("trackName", title), target.optString("artistName", artist),
+                target.optString("collectionName", ""), target.optString("primaryGenreName", ""),
+                target.optString("releaseDate", "").take(4), target.optString("artworkUrl100", "").replace("100x100", "600x600")
+            )
+        } catch (_: Exception) { null }
+    }
+
+
+    suspend fun downloadCover(context: Context, songId: Long, artworkUrl: String): Boolean = withContext(Dispatchers.IO) {
+        if (artworkUrl.isBlank()) return@withContext false
+        try {
+            val bytes = URL(artworkUrl).openStream().use { it.readBytes() }
+            if (bytes.isEmpty() || bytes.size > 12 * 1024 * 1024) return@withContext false
+            File(context.filesDir, "auto_cover_$songId.jpg").writeBytes(bytes)
+            true
+        } catch (_: Exception) { false }
+    }
+
+    suspend fun lyrics(title: String, artist: String): List<LyricsLine> = withContext(Dispatchers.IO) {
+        try {
+            val t = URLEncoder.encode(title, "UTF-8"); val a = URLEncoder.encode(artist, "UTF-8")
+            val root = JSONObject(get("https://lrclib.net/api/get?track_name=$t&artist_name=$a"))
+            val synced = root.optString("syncedLyrics", root.optString("syncedLyrics", ""))
+            if (synced.isBlank()) return@withContext emptyList()
+            val regex = Regex("\\[(\\d{2}):(\\d{2})(?:\\.(\\d{1,3}))?]([^\\r\\n]*)")
+            regex.findAll(synced).map { m ->
+                val ms = (m.groupValues[1].toLong() * 60_000) + (m.groupValues[2].toLong() * 1000) + m.groupValues[3].padEnd(3, '0').ifBlank { "0" }.toLong()
+                LyricsLine(ms, m.groupValues[4].trim())
+            }.toList()
+        } catch (_: Exception) { emptyList() }
+    }
+}

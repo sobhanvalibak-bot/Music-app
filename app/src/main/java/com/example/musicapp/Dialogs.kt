@@ -9,6 +9,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -184,6 +185,11 @@ fun EditSongDialog(
     var genre by remember(song.id) { mutableStateOf("") }
     var year by remember(song.id) { mutableStateOf("") }
     var track by remember(song.id) { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    var onlineBusy by remember(song.id) { mutableStateOf(false) }
+    var onlineMessage by remember(song.id) { mutableStateOf("") }
+    var lyrics by remember(song.id) { mutableStateOf<List<LyricsLine>>(emptyList()) }
+    var showLyrics by remember(song.id) { mutableStateOf(false) }
 
     LaunchedEffect(song.id) {
         val t = TagEditor.readTags(context, song)
@@ -213,6 +219,32 @@ fun EditSongDialog(
                     else "Reading the file…",
                     color = p.secondary, fontSize = 13.sp
                 )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(enabled = enabled && !onlineBusy, onClick = {
+                        onlineBusy = true; onlineMessage = "Searching online…"
+                        scope.launch {
+                            val info = AutoMusicLookup.songInfo(title.ifBlank { song.title }, artist.ifBlank { song.artist })
+                            if (info != null) {
+                                title = info.title; artist = info.artist; album = info.album
+                                genre = info.genre; year = info.year
+                                val coverSaved = AutoMusicLookup.downloadCover(context, song.id, info.artworkUrl)
+                                if (coverSaved) invalidateSongCover(song.id)
+                                onlineMessage = if (coverSaved) "Metadata and album cover downloaded for this app." else "Metadata found; no cover image was available."
+                            } else onlineMessage = "No match found. Check internet and try again."
+                            onlineBusy = false
+                        }
+                    }) { Text(if (onlineBusy) "Searching…" else "Auto-fill online", color = p.accent) }
+                    TextButton(enabled = enabled && !onlineBusy, onClick = {
+                        onlineBusy = true; onlineMessage = "Looking for synchronized lyrics…"
+                        scope.launch {
+                            lyrics = AutoMusicLookup.lyrics(title.ifBlank { song.title }, artist.ifBlank { song.artist })
+                            showLyrics = true
+                            onlineMessage = if (lyrics.isNotEmpty()) "Synced lyrics found (${lyrics.size} lines)." else "No synced lyrics found for this track."
+                            onlineBusy = false
+                        }
+                    }) { Text("Find lyrics", color = p.accent) }
+                }
+                if (onlineMessage.isNotBlank()) Text(onlineMessage, color = p.secondary, fontSize = 12.sp)
                 OutlinedTextField(
                     value = title, onValueChange = { title = it }, enabled = enabled,
                     label = { Text("Title") }, singleLine = true, colors = fieldColors(p)
@@ -255,4 +287,20 @@ fun EditSongDialog(
             TextButton(enabled = !saving, onClick = onDismiss) { Text("Cancel", color = p.secondary) }
         }
     )
+    if (showLyrics) {
+        AlertDialog(
+            onDismissRequest = { showLyrics = false },
+            containerColor = p.card,
+            title = { Text("Synchronized lyrics", color = p.text) },
+            text = {
+                if (lyrics.isEmpty()) Text("No timed lyrics were found. Try checking the title and artist.", color = p.secondary)
+                else Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    lyrics.forEach { line ->
+                        Text("${line.timeMs / 60000}:${((line.timeMs % 60000) / 1000).toString().padStart(2, '0')}  ${line.text}", color = p.text, modifier = Modifier.padding(vertical = 4.dp))
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showLyrics = false }) { Text("Done", color = p.accent) } }
+        )
+    }
 }

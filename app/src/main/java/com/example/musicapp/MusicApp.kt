@@ -77,6 +77,18 @@ fun MusicApp(
     val photoPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri -> if (uri != null) scope.launch { profile.savePhoto(uri) } }
+    val avatarVideoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) scope.launch {
+            val ok = profile.saveVideo(uri, false)
+            Toast.makeText(context, if (ok) "Animated profile video saved" else "Video must be MP4 and no larger than 50 MB", Toast.LENGTH_LONG).show()
+        }
+    }
+    val bannerVideoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) scope.launch {
+            val ok = profile.saveVideo(uri, true)
+            Toast.makeText(context, if (ok) "Animated banner saved" else "Video must be MP4 and no larger than 50 MB", Toast.LENGTH_LONG).show()
+        }
+    }
 
     // Editing song info: tags are written into the audio file, which Android only allows after
     // the user agrees (Android 10+: system dialog, Android 9-: storage permission).
@@ -154,7 +166,7 @@ fun MusicApp(
 
     // While typing in search the keyboard needs the space, so the bars slide away too.
     val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-    val barsShown = barsVisible && !(searching && imeOpen)
+    val barsShown = !(searching && imeOpen)
 
     // Mini player and tab bar slide down off the screen and come back up with a spring.
     val miniHide by animateFloatAsState(
@@ -272,6 +284,13 @@ fun MusicApp(
         c.play()
     }
 
+    fun queueNext(song: Song) {
+        val c = controller ?: return
+        val insertAt = (c.currentMediaItemIndex + 1).coerceAtLeast(0)
+        c.addMediaItem(insertAt, song.toMediaItem())
+        Toast.makeText(context, "Will play next: ${song.title}", Toast.LENGTH_SHORT).show()
+    }
+
     // "Cover" theme: take the colour from the cover of the song that is playing.
     LaunchedEffect(current?.id, settings.theme) {
         if (settings.theme == 3) onTint(current?.let { songTint(context, it) })
@@ -365,6 +384,8 @@ fun MusicApp(
                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                             )
                         },
+                        onPickAvatarVideo = { avatarVideoPicker.launch("video/mp4") },
+                        onPickBannerVideo = { bannerVideoPicker.launch("video/mp4") },
                         onEdit = { showEdit = true },
                         onSettings = { sub = Sub.Settings },
                         onFavorites = { sub = Sub.Favorites },
@@ -389,7 +410,9 @@ fun MusicApp(
                             onPlay = { i -> playQueue(favSongs, i) },
                             onToggleFav = { profile.toggleFavorite(it.id) },
                             onLong = { addTarget = it },
-                            onRemove = null
+                            onRemove = null,
+                            onPlayNext = { queueNext(it) },
+                            onEditInfo = { editTarget = it }
                         )
                     }
                     is Sub.PlaylistPage -> {
@@ -433,7 +456,9 @@ fun MusicApp(
                     bottomPad = bottomPad,
                     onPlay = { i -> playQueue(sorted, i) },
                     onToggleFav = { profile.toggleFavorite(it.id) },
-                    onLong = { addTarget = it }
+                    onLong = { addTarget = it },
+                    onPlayNext = { queueNext(it) },
+                    onEditInfo = { editTarget = it }
                 )
                 1 -> AlbumsTab(albums, p, sortSubtitle, topPad, bottomPad) { list -> playQueue(list, 0) }
                 else -> ArtistsTab(artists, p, topPad, bottomPad) { g -> artistPage = g.name }
@@ -465,7 +490,9 @@ fun MusicApp(
                     onToggleFav = { profile.toggleFavorite(it.id) },
                     onLong = { addTarget = it },
                     onRemove = null,
-                    backLabel = "Back"
+                    backLabel = "Back",
+                    onPlayNext = { queueNext(it) },
+                    onEditInfo = { editTarget = it }
                 )
             }
         }
@@ -500,7 +527,7 @@ fun MusicApp(
                 Box(
                     Modifier.graphicsLayer {
                         translationY = miniHide * (size.height + 160.dp.toPx())
-                        alpha = 1f - miniHide * 0.5f
+                        alpha = 1f
                     }
                 ) {
                     MiniPlayer(

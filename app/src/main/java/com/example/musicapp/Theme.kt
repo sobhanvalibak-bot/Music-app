@@ -1,5 +1,6 @@
 package com.example.musicapp
 
+import java.io.File
 import android.content.ContentUris
 import android.content.Context
 import android.graphics.Bitmap
@@ -58,7 +59,8 @@ class Palette(
     baseAccent: Color,
     glass: Float,
     val corner: Float,
-    tint: Color? = null
+    tint: Color? = null,
+    val opaqueClassic: Boolean = false
 ) {
     val tinted = tint != null
 
@@ -81,10 +83,10 @@ class Palette(
     val text: Color = if (dark) Color.White else Color.Black
     val secondary: Color = if (tinted) Color.White.copy(alpha = 0.62f) else Color(0xFF8E8E93)
     val glassTop: Color =
-        if (tinted) tone(0.7f, 0.38f).copy(alpha = glass)
+        if (opaqueClassic) card else if (tinted) tone(0.7f, 0.38f).copy(alpha = glass)
         else if (dark) Color(0xFF3A3A3C).copy(alpha = glass) else Color.White.copy(alpha = glass)
     val glassBottom: Color =
-        (if (tinted) tone(0.8f, 0.22f) else if (dark) Color(0xFF1C1C1E) else Color(0xFFF7F7FA))
+        if (opaqueClassic) card else (if (tinted) tone(0.8f, 0.22f) else if (dark) Color(0xFF1C1C1E) else Color(0xFFF7F7FA))
             .copy(alpha = (glass - 0.14f).coerceAtLeast(0.2f))
     val selectedPill: Color = if (dark) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.07f)
     val coverTop: Color = if (tinted) tone(0.6f, 0.40f) else if (dark) Color(0xFF3A3A3C) else Color(0xFFE5E5EA)
@@ -160,6 +162,8 @@ private val artCache = object : LruCache<String, ImageBitmap>(48 * 1024 * 1024) 
     override fun sizeOf(key: String, value: ImageBitmap): Int = value.width * value.height * 4
 }
 
+fun invalidateSongCover(songId: Long) { for (size in listOf(96, 300, 400, 700)) artCache.remove("${songId}_$size") }
+
 /**
  * The cover embedded in the audio file itself is the original, full-resolution artwork.
  * It is decoded with the largest sample size that still keeps at least [px] pixels,
@@ -189,7 +193,9 @@ private fun loadEmbedded(context: Context, song: Song, px: Int): Bitmap? {
 private suspend fun loadArt(context: Context, song: Song, px: Int): ImageBitmap? =
     withContext(Dispatchers.IO) {
         try {
-            val bmp = loadEmbedded(context, song, px) ?: if (Build.VERSION.SDK_INT >= 29) {
+            val customCover = File(context.filesDir, "auto_cover_${song.id}.jpg")
+            val bmp = (if (customCover.exists()) BitmapFactory.decodeFile(customCover.absolutePath) else null)
+                ?: loadEmbedded(context, song, px) ?: if (Build.VERSION.SDK_INT >= 29) {
                 context.contentResolver.loadThumbnail(song.uri, Size(px, px), null)
             } else {
                 val u = ContentUris.withAppendedId(albumArtBase, song.albumId)

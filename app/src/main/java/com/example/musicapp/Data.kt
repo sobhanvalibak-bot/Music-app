@@ -3,6 +3,7 @@ package com.example.musicapp
 import android.Manifest
 import android.content.ContentUris
 import android.content.Context
+import android.database.Cursor
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -19,6 +20,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -132,6 +134,7 @@ class Settings(private val prefs: SharedPreferences) {
     var accent by mutableIntStateOf(prefs.getInt("accent", 0)); private set
     var sort by mutableIntStateOf(prefs.getInt("sort", 0)); private set
     var glass by mutableFloatStateOf(prefs.getFloat("glass", 0.78f)); private set
+    var opaqueClassic by mutableStateOf(prefs.getBoolean("opaque_classic", false)); private set
     var corners by mutableFloatStateOf(prefs.getFloat("corners", 1f)); private set
     var showDuration by mutableStateOf(prefs.getBoolean("duration", true)); private set
 
@@ -139,6 +142,7 @@ class Settings(private val prefs: SharedPreferences) {
     fun changeAccent(v: Int) { accent = v; prefs.edit().putInt("accent", v).apply() }
     fun changeSort(v: Int) { sort = v; prefs.edit().putInt("sort", v).apply() }
     fun changeGlass(v: Float) { glass = v; prefs.edit().putFloat("glass", v).apply() }
+    fun changeOpaqueClassic(v: Boolean) { opaqueClassic = v; prefs.edit().putBoolean("opaque_classic", v).apply() }
     fun changeCorners(v: Float) { corners = v; prefs.edit().putFloat("corners", v).apply() }
     fun changeShowDuration(v: Boolean) { showDuration = v; prefs.edit().putBoolean("duration", v).apply() }
 }
@@ -150,6 +154,10 @@ data class Playlist(val id: String, val name: String, val songIds: List<Long>)
 class ProfileStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("profile", Context.MODE_PRIVATE)
     private val photoFile = File(context.filesDir, "profile_photo.jpg")
+    private val avatarVideoFile = File(context.filesDir, "profile_avatar.mp4")
+    private val bannerVideoFile = File(context.filesDir, "profile_banner.mp4")
+    var avatarVideoPath by mutableStateOf(if (avatarVideoFile.exists()) avatarVideoFile.absolutePath else ""); private set
+    var bannerVideoPath by mutableStateOf(if (bannerVideoFile.exists()) bannerVideoFile.absolutePath else ""); private set
 
     var name by mutableStateOf(prefs.getString("name", "") ?: ""); private set
     var username by mutableStateOf(prefs.getString("username", "") ?: ""); private set
@@ -213,6 +221,20 @@ class ProfileStore(private val context: Context) {
             }
         }
         if (result != null) photo = result
+    }
+
+    suspend fun saveVideo(uri: Uri, banner: Boolean): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val size = context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+            if (size > 50L * 1024L * 1024L) return@withContext false
+            val dest = if (banner) bannerVideoFile else avatarVideoFile
+            context.contentResolver.openInputStream(uri)?.use { input -> dest.outputStream().use { output -> input.copyTo(output) } } ?: return@withContext false
+            if (dest.length() > 50L * 1024L * 1024L) { dest.delete(); return@withContext false }
+            withContext(Dispatchers.Main) {
+                if (banner) bannerVideoPath = dest.absolutePath else avatarVideoPath = dest.absolutePath
+            }
+            true
+        } catch (_: Exception) { false }
     }
 
     fun removePhoto() {

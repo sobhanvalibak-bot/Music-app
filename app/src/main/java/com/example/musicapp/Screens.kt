@@ -17,6 +17,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -106,7 +108,9 @@ fun SongRow(
     onClick: () -> Unit,
     onFav: () -> Unit,
     onLong: (() -> Unit)? = null,
-    onRemove: (() -> Unit)? = null
+    onRemove: (() -> Unit)? = null,
+    onPlayNext: (() -> Unit)? = null,
+    onEditInfo: (() -> Unit)? = null
 ) {
     Row(
         Modifier
@@ -131,6 +135,29 @@ fun SongRow(
         if (showDuration) {
             Spacer(Modifier.width(8.dp))
             Text(formatTime(song.durationMs), fontSize = 13.sp, color = p.secondary)
+        }
+        var menuOpen by remember(song.id) { mutableStateOf(false) }
+        Box {
+            IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.MoreVert, contentDescription = "Song options", tint = p.secondary)
+            }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text("Play next") },
+                    onClick = { menuOpen = false; onPlayNext?.invoke() },
+                    enabled = onPlayNext != null
+                )
+                DropdownMenuItem(
+                    text = { Text("Add to playlist") },
+                    onClick = { menuOpen = false; onLong?.invoke() },
+                    enabled = onLong != null
+                )
+                DropdownMenuItem(
+                    text = { Text("Edit song info") },
+                    onClick = { menuOpen = false; onEditInfo?.invoke() },
+                    enabled = onEditInfo != null
+                )
+            }
         }
         Box(
             Modifier.size(40.dp).clip(CircleShape).clickable { onFav() },
@@ -200,7 +227,9 @@ fun SongListPage(
     onToggleFav: (Song) -> Unit,
     onLong: (Song) -> Unit,
     onRemove: ((Song) -> Unit)?,
-    backLabel: String = "Profile"
+    backLabel: String = "Profile",
+    onPlayNext: (Song) -> Unit = {},
+    onEditInfo: (Song) -> Unit = {}
 ) {
     LazyColumn(contentPadding = PaddingValues(top = topPad, bottom = bottomPad)) {
         item { BackBar(backLabel, p, onBack) }
@@ -224,7 +253,9 @@ fun SongListPage(
                 onClick = { onPlay(index) },
                 onFav = { onToggleFav(song) },
                 onLong = { onLong(song) },
-                onRemove = onRemove?.let { r -> { r(song) } }
+                onRemove = onRemove?.let { r -> { r(song) } },
+                onPlayNext = { onPlayNext(song) },
+                onEditInfo = { onEditInfo(song) }
             )
         }
     }
@@ -343,6 +374,8 @@ fun ProfileTab(
     topPad: Dp,
     bottomPad: Dp,
     onPickPhoto: () -> Unit,
+    onPickAvatarVideo: () -> Unit,
+    onPickBannerVideo: () -> Unit,
     onEdit: () -> Unit,
     onSettings: () -> Unit,
     onFavorites: () -> Unit,
@@ -364,17 +397,35 @@ fun ProfileTab(
             }
         }
         item {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                if (profile.bannerVideoPath.isNotBlank()) {
+                    LoopingProfileVideo(profile.bannerVideoPath, Modifier.fillMaxWidth().height(130.dp).clip(RoundedCornerShape(18.dp)))
+                } else {
+                    Box(Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(18.dp)).background(p.card), contentAlignment = Alignment.Center) {
+                        Text("Profile banner", color = p.secondary)
+                    }
+                }
+                Text("Change animated banner (MP4 · max 50 MB)", color = p.accent, modifier = Modifier.clickable { onPickBannerVideo() }.padding(vertical = 8.dp), fontSize = 13.sp)
+            }
+        }
+        item {
             Column(
                 Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Avatar(
-                    photo = profile.photo,
-                    name = profile.name,
-                    p = p,
-                    modifier = Modifier.size(104.dp).clickable { onPickPhoto() },
-                    textSize = 42.sp
-                )
+                if (profile.avatarVideoPath.isNotBlank()) {
+                    LoopingProfileVideo(profile.avatarVideoPath, Modifier.size(104.dp).clip(CircleShape).clickable { onPickAvatarVideo() })
+                } else {
+                    Avatar(
+                        photo = profile.photo,
+                        name = profile.name,
+                        p = p,
+                        modifier = Modifier.size(104.dp).clickable { onPickPhoto() },
+                        textSize = 42.sp
+                    )
+                }
+                Text("Use animated profile video (MP4 · max 50 MB)", color = p.accent, fontSize = 12.sp,
+                    modifier = Modifier.clickable { onPickAvatarVideo() }.padding(top = 6.dp))
                 Spacer(Modifier.height(6.dp))
                 Text(
                     if (profile.photo == null) "Add photo" else "Change photo",

@@ -129,6 +129,17 @@ fun SettingsTab(settings: Settings, p: Palette, topPad: Dp, bottomPad: Dp, onBac
             }
         }
         item {
+            SettingsCard("Liquid Glass · Classic mode", p) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Opaque, fixed player and navigation", fontSize = 15.sp, color = p.text)
+                        Text("Hide everything behind the bars and stop hiding them on scroll.", fontSize = 12.sp, color = p.secondary)
+                    }
+                    Switch(checked = settings.opaqueClassic, onCheckedChange = { settings.changeOpaqueClassic(it) })
+                }
+            }
+        }
+        item {
             SettingsCard("Cover corners", p) {
                 Slider(
                     value = settings.corners,
