@@ -92,3 +92,12 @@ Everything stays on the device and nothing is uploaded anywhere.
 ## Tech
 
 Kotlin 2.0, Jetpack Compose (Material 3), AndroidX Media3 (ExoPlayer and Session), minSdk 24, targetSdk 35.
+
+
+## Latest completion pass (2026-10-19)
+- Added persistent Recently Played history (up to 30 tracks) and a horizontal Recently Played section on the Home/music screen.
+- History updates when the Media3 session transitions to a track and persists across app restarts.
+- Expanded synchronized-lyrics lookup: tries the exact LRCLIB endpoint, then search results and track detail endpoints; parses minute/second timestamps and filters empty lines.
+- Smoothed cover-derived theme color transitions to 1.1 seconds with FastOutSlowIn easing.
+
+Build verification: this archive does not include Gradle Wrapper scripts and the current environment has no `gradle` executable, so an Android compile could not be run here. Please run `assembleDebug` in GitHub Actions to validate the full Android toolchain. Existing notification currently relies on Media3's standard media-session controls; custom Shuffle/Repeat/Like notification buttons are not yet implemented in this pass.
