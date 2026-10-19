@@ -164,10 +164,12 @@ class ProfileStore(private val context: Context) {
     var bio by mutableStateOf(prefs.getString("bio", "") ?: ""); private set
     var photo by mutableStateOf<ImageBitmap?>(readPhoto()); private set
     val favorites = mutableStateListOf<Long>()
+    val recentlyPlayed = mutableStateListOf<Long>()
     val playlists = mutableStateListOf<Playlist>()
 
     init {
         prefs.getString("fav", "")?.split(",")?.mapNotNull { it.toLongOrNull() }?.let { favorites.addAll(it) }
+        prefs.getString("recent", "")?.split(",")?.mapNotNull { it.toLongOrNull() }?.let { recentlyPlayed.addAll(it) }
         val json = prefs.getString("playlists", null)
         if (json != null) {
             try {
@@ -240,6 +242,13 @@ class ProfileStore(private val context: Context) {
     fun removePhoto() {
         photoFile.delete()
         photo = null
+    }
+
+    fun recordRecentlyPlayed(id: Long) {
+        recentlyPlayed.remove(id)
+        recentlyPlayed.add(0, id)
+        while (recentlyPlayed.size > 30) recentlyPlayed.removeAt(recentlyPlayed.lastIndex)
+        prefs.edit().putString("recent", recentlyPlayed.joinToString(",")).apply()
     }
 
     fun toggleFavorite(id: Long) {

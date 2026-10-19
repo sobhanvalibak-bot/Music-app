@@ -36,7 +36,7 @@ class MainActivity : ComponentActivity() {
             val coverMode = settings.theme == 3
             val animTint by animateColorAsState(
                 coverTint ?: Color(0xFF3A3A3C),
-                animationSpec = tween(700),
+                animationSpec = tween(durationMillis = 1100, easing = androidx.compose.animation.core.FastOutSlowInEasing),
                 label = "coverTint"
             )
             val tintNow: Color? = if (coverMode && coverTint != null) animTint else null

@@ -75,15 +75,33 @@ object AutoMusicLookup {
 
     suspend fun lyrics(title: String, artist: String): List<LyricsLine> = withContext(Dispatchers.IO) {
         try {
-            val t = URLEncoder.encode(title, "UTF-8"); val a = URLEncoder.encode(artist, "UTF-8")
-            val root = JSONObject(get("https://lrclib.net/api/get?track_name=$t&artist_name=$a"))
-            val synced = root.optString("syncedLyrics", "")
+            val t = URLEncoder.encode(title.trim(), "UTF-8")
+            val a = URLEncoder.encode(artist.trim(), "UTF-8")
+            // First try the exact LRCLIB endpoint, then search results; some tracks are indexed
+            // with slightly different album/version metadata and are only found through search.
+            val exact = runCatching { JSONObject(get("https://lrclib.net/api/get?track_name=$t&artist_name=$a")) }.getOrNull()
+            var synced = exact?.optString("syncedLyrics", "").orEmpty()
+            if (synced.isBlank()) {
+                val search = JSONArray(get("https://lrclib.net/api/search?track_name=$t&artist_name=$a"))
+                for (i in 0 until search.length()) {
+                    val candidate = search.optJSONObject(i) ?: continue
+                    val candidateLyrics = candidate.optString("syncedLyrics", "")
+                    if (candidateLyrics.isNotBlank()) { synced = candidateLyrics; break }
+                    val id = candidate.optLong("id", -1L)
+                    if (id > 0) {
+                        val detail = runCatching { JSONObject(get("https://lrclib.net/api/get/$id")) }.getOrNull()
+                        synced = detail?.optString("syncedLyrics", "").orEmpty()
+                        if (synced.isNotBlank()) break
+                    }
+                }
+            }
             if (synced.isBlank()) return@withContext emptyList()
-            val regex = Regex("\\[(\\d{2}):(\\d{2})(?:\\.(\\d{1,3}))?]([^\\r\\n]*)")
+            val regex = Regex("\\[(\\d{1,2}):(\\d{2})(?:[.:](\\d{1,3}))?]([^\\r\\n]*)")
             regex.findAll(synced).map { m ->
-                val ms = (m.groupValues[1].toLong() * 60_000) + (m.groupValues[2].toLong() * 1000) + m.groupValues[3].padEnd(3, '0').ifBlank { "0" }.toLong()
+                val fraction = m.groupValues[3].ifBlank { "0" }.padEnd(3, '0').take(3).toLong()
+                val ms = m.groupValues[1].toLong() * 60_000 + m.groupValues[2].toLong() * 1000 + fraction
                 LyricsLine(ms, m.groupValues[4].trim())
-            }.toList()
+            }.filter { it.text.isNotBlank() }.sortedBy { it.timeMs }.toList()
         } catch (_: Exception) { emptyList() }
     }
 }

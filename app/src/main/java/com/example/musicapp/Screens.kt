@@ -183,6 +183,7 @@ fun SongRow(
 @Composable
 fun SongsTab(
     songs: List<Song>,
+    recentlyPlayed: List<Song> = emptyList(),
     current: Song?,
     favSet: Set<Long>,
     p: Palette,
@@ -228,6 +229,24 @@ fun SongsTab(
                             Text(featured.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = p.secondary)
                             Spacer(Modifier.height(8.dp))
                             Text(if (current != null && current.id == featured.id) "Open player  ›" else "Play track  ›", color = p.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+                if (recentlyPlayed.isNotEmpty()) {
+                    Spacer(Modifier.height(18.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("Recently Played", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = p.text)
+                        Text("${recentlyPlayed.size} tracks", fontSize = 12.sp, color = p.secondary)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(end = 4.dp)) {
+                        items(recentlyPlayed.take(12), key = { "recent-${it.id}" }) { recent ->
+                            Column(Modifier.width(116.dp).clickable { onPlay(songs.indexOfFirst { it.id == recent.id }.coerceAtLeast(0)) }) {
+                                Cover(recent, Modifier.size(116.dp), 16.dp, p, 300)
+                                Spacer(Modifier.height(7.dp))
+                                Text(recent.title, color = p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(recent.artist, color = p.secondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
                         }
                     }
                 }

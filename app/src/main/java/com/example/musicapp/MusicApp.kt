@@ -138,6 +138,7 @@ fun MusicApp(
 
     var showPlayer by remember { mutableStateOf(false) }
     var artistPage by remember { mutableStateOf<String?>(null) }
+    var albumPage by remember { mutableStateOf<List<Song>?>(null) }
     var barsVisible by remember { mutableStateOf(true) }
     var searching by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
@@ -268,7 +269,7 @@ fun MusicApp(
                 override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) { shuffle = shuffleModeEnabled }
                 override fun onRepeatModeChanged(mode: Int) { repeatMode = mode }
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                    current = mediaItem?.mediaId?.toLongOrNull()?.let { byId[it] }
+                    current = mediaItem?.mediaId?.toLongOrNull()?.let { id -> byId[id]?.also { profile.recordRecentlyPlayed(id) } }
                 }
             }
             c.addListener(listener)
@@ -452,6 +453,7 @@ fun MusicApp(
             } else when (t) {
                 0 -> SongsTab(
                     songs = sorted,
+                    recentlyPlayed = profile.recentlyPlayed.mapNotNull { byId[it] },
                     current = current,
                     favSet = favSet,
                     p = p,
@@ -465,8 +467,25 @@ fun MusicApp(
                     onPlayNext = { queueNext(it) },
                     onEditInfo = { editTarget = it }
                 )
-                1 -> AlbumsTab(albums, p, sortSubtitle, topPad, bottomPad) { list -> playQueue(list, 0) }
+                1 -> AlbumsTab(albums, p, sortSubtitle, topPad, bottomPad) { list -> albumPage = list }
                 else -> ArtistsTab(artists, p, topPad, bottomPad) { g -> artistPage = g.name }
+            }
+        }
+
+        // Album detail: opening an album browses its tracks without starting playback.
+        albumPage?.let { list ->
+            Box(Modifier.fillMaxSize().background(p.bgBrush)) {
+                SongListPage(
+                    title = list.firstOrNull()?.album ?: "Album",
+                    subtitle = "${list.size} songs · ${list.firstOrNull()?.artist.orEmpty()}",
+                    songs = list, current = current, favSet = favSet, p = p,
+                    showDuration = showDuration, topPad = topPad, bottomPad = bottomPad,
+                    onBack = { albumPage = null },
+                    onPlay = { i -> playQueue(list, i) },
+                    onToggleFav = { profile.toggleFavorite(it.id) },
+                    onLong = { addTarget = it }, onRemove = null, backLabel = "Albums",
+                    onPlayNext = { queueNext(it) }, onEditInfo = { editTarget = it }
+                )
             }
         }
 

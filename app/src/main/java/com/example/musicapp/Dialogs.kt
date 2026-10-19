@@ -237,7 +237,16 @@ fun EditSongDialog(
                                 if (coverSaved) invalidateSongCover(song.id)
                                 onlineMessage = if (coverSaved) "Metadata and album cover downloaded for this app." else "Metadata found; no cover image was available."
                             } else onlineMessage = if (lookupFailure != null) {
-                                "Online lookup failed (${lookupFailure}). Check connection, VPN or try again later."
+                                val detail = lookupFailure.orEmpty()
+                                when {
+                                    detail.contains("Permission denied", ignoreCase = true) || detail.contains("INTERNET permission", ignoreCase = true) ->
+                                        "Android denied the network request. INTERNET permission is declared in the app manifest; install the newest build again and retry. Details: $detail"
+                                    detail.contains("UnknownHost", ignoreCase = true) || detail.contains("unable to resolve", ignoreCase = true) ->
+                                        "Could not resolve the online catalog host. Check DNS, VPN or network restrictions. Details: $detail"
+                                    detail.contains("timed out", ignoreCase = true) || detail.contains("timeout", ignoreCase = true) ->
+                                        "The online catalog took too long to respond. Try again shortly. Details: $detail"
+                                    else -> "Online catalog request failed: $detail"
+                                }
                             } else {
                                 "No matching track found in the online catalog. Try a shorter title or include the artist."
                             }
