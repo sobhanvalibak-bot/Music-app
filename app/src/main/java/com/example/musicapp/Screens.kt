@@ -192,7 +192,9 @@ fun SongsTab(
     bottomPad: Dp,
     onPlay: (Int) -> Unit,
     onToggleFav: (Song) -> Unit,
-    onLong: (Song) -> Unit
+    onLong: (Song) -> Unit,
+    onPlayNext: (Song) -> Unit = {},
+    onEditInfo: (Song) -> Unit = {}
 ) {
     LazyColumn(contentPadding = PaddingValues(top = topPad, bottom = bottomPad)) {
         item { LargeTitle("Songs", "${songs.size} songs · $sortSubtitle", p) }
@@ -205,7 +207,9 @@ fun SongsTab(
                 fav = favSet.contains(song.id),
                 onClick = { onPlay(index) },
                 onFav = { onToggleFav(song) },
-                onLong = { onLong(song) }
+                onLong = { onLong(song) },
+                onPlayNext = { onPlayNext(song) },
+                onEditInfo = { onEditInfo(song) }
             )
         }
     }
