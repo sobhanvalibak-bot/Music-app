@@ -11,8 +11,22 @@ android {
         applicationId = "com.example.musicapp"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
+    }
+    // One fixed key for every build, so a new APK installs over the old one (an update)
+    // and keeps the app's data instead of failing with a signature conflict.
+    signingConfigs {
+        create("fixed") {
+            storeFile = file("musicapp.jks")
+            storePassword = "musicapp123"
+            keyAlias = "musicapp"
+            keyPassword = "musicapp123"
+        }
+    }
+    buildTypes {
+        getByName("debug") { signingConfig = signingConfigs.getByName("fixed") }
+        getByName("release") { signingConfig = signingConfigs.getByName("fixed") }
     }
     buildFeatures { compose = true }
     compileOptions {
@@ -30,4 +44,6 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-session:1.4.1")
+    // Reads and writes the real tags inside mp3 / m4a / flac / ogg files (Android build of jaudiotagger)
+    implementation("com.github.AdrienPoupa:jaudiotagger:2.2.3")
 }
