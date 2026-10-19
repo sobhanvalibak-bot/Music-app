@@ -202,8 +202,8 @@ fun SongsTab(
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("YOUR SOUNDTRACK", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = p.accent, letterSpacing = 1.5.sp)
-                        Text("Your music", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = p.text)
+                        Text("DISCOVER YOUR SOUND", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = p.accent, letterSpacing = 1.5.sp)
+                        Text("Discover", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = p.text)
                         Text("${songs.size} tracks · $sortSubtitle", fontSize = 13.sp, color = p.secondary)
                     }
                     Box(Modifier.size(44.dp).clip(CircleShape).background(p.selectedPill), contentAlignment = Alignment.Center) {
@@ -223,12 +223,45 @@ fun SongsTab(
                         Cover(featured, Modifier.size(88.dp), 16.dp, p, 400)
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(if (current != null) "NOW PLAYING" else "PICK UP THE VIBE", fontSize = 10.sp, color = p.accent, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            Text(if (current != null) "NOW PLAYING" else "TODAY’S PICK", fontSize = 10.sp, color = p.accent, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                             Spacer(Modifier.height(4.dp))
                             Text(featured.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = p.text)
                             Text(featured.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = p.secondary)
                             Spacer(Modifier.height(8.dp))
                             Text(if (current != null && current.id == featured.id) "Open player  ›" else "Play track  ›", color = p.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+                if (songs.isNotEmpty()) {
+                    Spacer(Modifier.height(20.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("Quick picks", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = p.text)
+                        Text("From your library", fontSize = 12.sp, color = p.secondary)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    // Magazine-style discovery grid using real local tracks, not fabricated online recommendations.
+                    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                        songs.take(4).chunked(2).forEach { pair ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                                pair.forEach { pick ->
+                                    Row(
+                                        Modifier.weight(1f).height(66.dp)
+                                            .clip(RoundedCornerShape(15.dp))
+                                            .background(Brush.linearGradient(listOf(p.accent.copy(alpha = 0.20f), p.card)))
+                                            .clickable { onPlay(songs.indexOfFirst { it.id == pick.id }.coerceAtLeast(0)) }
+                                            .padding(7.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Cover(pick, Modifier.size(50.dp), 10.dp, p, 250)
+                                        Spacer(Modifier.width(8.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text(pick.title, color = p.text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                            Text(pick.artist, color = p.secondary, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+                                    }
+                                }
+                                if (pair.size == 1) Spacer(Modifier.weight(1f))
+                            }
                         }
                     }
                 }
@@ -468,7 +501,7 @@ fun ProfileTab(
                 if (profile.bannerVideoPath.isNotBlank()) {
                     LoopingProfileVideo(profile.bannerVideoPath, Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(18.dp)))
                 } else {
-                    Box(Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(18.dp)).background(p.card), contentAlignment = Alignment.Center) {
+                    Box(Modifier.fillMaxWidth().height(72.dp).glass(RoundedCornerShape(18.dp), p), contentAlignment = Alignment.Center) {
                         Text("Profile banner", color = p.secondary)
                     }
                 }
@@ -537,8 +570,7 @@ fun ProfileTab(
                     Column(
                         Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(p.card)
+                            .glass(RoundedCornerShape(16.dp), p)
                             .padding(vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
