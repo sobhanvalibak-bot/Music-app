@@ -5,6 +5,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -67,10 +69,53 @@ fun Segmented(options: List<String>, selected: Int, p: Palette, onSelect: (Int) 
 }
 
 @Composable
-fun SettingsTab(settings: Settings, p: Palette, topPad: Dp, bottomPad: Dp, onBack: () -> Unit) {
+fun SettingsTab(
+    settings: Settings,
+    p: Palette,
+    topPad: Dp,
+    bottomPad: Dp,
+    profile: ProfileStore,
+    onPickPhoto: () -> Unit,
+    onPickAvatarVideo: () -> Unit,
+    onPickBannerVideo: () -> Unit,
+    onBack: () -> Unit
+) {
     LazyColumn(contentPadding = PaddingValues(top = topPad, bottom = bottomPad)) {
         item { BackBar("Profile", p, onBack) }
         item { LargeTitle("Settings", "Make it yours", p) }
+        item {
+            SettingsCard("Profile media", p) {
+                Text("Profile picture and animated banner are managed here. MP4 videos up to 50 MB loop automatically.", fontSize = 13.sp, color = p.secondary)
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (profile.avatarVideoPath.isNotBlank()) {
+                        LoopingProfileVideo(profile.avatarVideoPath, Modifier.size(58.dp).clip(CircleShape))
+                    } else {
+                        Avatar(profile.photo, profile.name, p, Modifier.size(58.dp))
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("Profile picture", color = p.text, fontWeight = FontWeight.SemiBold)
+                        Text(if (profile.avatarVideoPath.isNotBlank()) "Animated MP4 active" else if (profile.photo != null) "Photo selected" else "Initials / photo", color = p.secondary, fontSize = 12.sp)
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onPickPhoto, modifier = Modifier.weight(1f)) { Text("Choose photo") }
+                    Button(onClick = onPickAvatarVideo, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = p.accent)) { Text("Choose MP4", color = Color.White) }
+                }
+                Spacer(Modifier.height(12.dp))
+                if (profile.bannerVideoPath.isNotBlank()) {
+                    LoopingProfileVideo(profile.bannerVideoPath, Modifier.fillMaxWidth().height(100.dp).clip(RoundedCornerShape(14.dp)))
+                } else {
+                    Box(Modifier.fillMaxWidth().height(68.dp).clip(RoundedCornerShape(14.dp)).background(p.selectedPill), contentAlignment = Alignment.Center) {
+                        Text("No animated banner selected", color = p.secondary, fontSize = 12.sp)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Button(onClick = onPickBannerVideo, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = p.accent)) {
+                    Text("Choose animated banner (MP4)", color = Color.White)
+                }
+            }
+        }
 
         item {
             SettingsCard("Appearance", p) {
@@ -132,8 +177,8 @@ fun SettingsTab(settings: Settings, p: Palette, topPad: Dp, bottomPad: Dp, onBac
             SettingsCard("Liquid Glass · Classic mode", p) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Opaque, fixed player and navigation", fontSize = 15.sp, color = p.text)
-                        Text("Hide everything behind the bars and stop hiding them on scroll.", fontSize = 12.sp, color = p.secondary)
+                        Text("Opaque player and navigation", fontSize = 15.sp, color = p.text)
+                        Text("Use solid backgrounds instead of transparent glass. Scrolling still hides and reveals the navigation bar.", fontSize = 12.sp, color = p.secondary)
                     }
                     Switch(checked = settings.opaqueClassic, onCheckedChange = { settings.changeOpaqueClassic(it) })
                 }

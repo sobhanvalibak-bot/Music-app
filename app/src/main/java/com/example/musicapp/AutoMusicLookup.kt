@@ -19,9 +19,19 @@ data class LyricsLine(val timeMs: Long, val text: String)
 object AutoMusicLookup {
     private fun get(url: String): String {
         val c = (URL(url).openConnection() as HttpURLConnection)
-        c.connectTimeout = 7000; c.readTimeout = 7000
-        c.setRequestProperty("User-Agent", "MusicApp/1.1 (Android)")
-        return try { c.inputStream.bufferedReader().use { it.readText() } } finally { c.disconnect() }
+        c.connectTimeout = 15000
+        c.readTimeout = 15000
+        c.instanceFollowRedirects = true
+        c.requestMethod = "GET"
+        c.setRequestProperty("User-Agent", "MusicApp/1.2 (Android; music metadata lookup)")
+        c.setRequestProperty("Accept", "application/json, text/plain, */*")
+        return try {
+            val code = c.responseCode
+            val stream = if (code in 200..299) c.inputStream else c.errorStream
+            val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) throw java.io.IOException("Online service returned HTTP $code")
+            body
+        } finally { c.disconnect() }
     }
 
     suspend fun songInfo(title: String, artist: String): OnlineSongInfo? = withContext(Dispatchers.IO) {
@@ -38,14 +48,25 @@ object AutoMusicLookup {
                 target.optString("collectionName", ""), target.optString("primaryGenreName", ""),
                 target.optString("releaseDate", "").take(4), target.optString("artworkUrl100", "").replace("100x100", "600x600")
             )
-        } catch (_: Exception) { null }
+        } catch (e: Exception) {
+            throw e
+        }
     }
 
 
     suspend fun downloadCover(context: Context, songId: Long, artworkUrl: String): Boolean = withContext(Dispatchers.IO) {
         if (artworkUrl.isBlank()) return@withContext false
         try {
-            val bytes = URL(artworkUrl).openStream().use { it.readBytes() }
+            val connection = (URL(artworkUrl).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 12000
+                readTimeout = 12000
+                instanceFollowRedirects = true
+                setRequestProperty("User-Agent", "MusicApp/1.2 (Android)")
+            }
+            val bytes = try {
+                if (connection.responseCode !in 200..299) return@withContext false
+                connection.inputStream.use { it.readBytes() }
+            } finally { connection.disconnect() }
             if (bytes.isEmpty() || bytes.size > 12 * 1024 * 1024) return@withContext false
             File(context.filesDir, "auto_cover_$songId.jpg").writeBytes(bytes)
             true
@@ -56,7 +77,7 @@ object AutoMusicLookup {
         try {
             val t = URLEncoder.encode(title, "UTF-8"); val a = URLEncoder.encode(artist, "UTF-8")
             val root = JSONObject(get("https://lrclib.net/api/get?track_name=$t&artist_name=$a"))
-            val synced = root.optString("syncedLyrics", root.optString("syncedLyrics", ""))
+            val synced = root.optString("syncedLyrics", "")
             if (synced.isBlank()) return@withContext emptyList()
             val regex = Regex("\\[(\\d{2}):(\\d{2})(?:\\.(\\d{1,3}))?]([^\\r\\n]*)")
             regex.findAll(synced).map { m ->

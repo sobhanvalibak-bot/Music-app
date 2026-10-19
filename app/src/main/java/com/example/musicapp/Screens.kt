@@ -197,7 +197,52 @@ fun SongsTab(
     onEditInfo: (Song) -> Unit = {}
 ) {
     LazyColumn(contentPadding = PaddingValues(top = topPad, bottom = bottomPad)) {
-        item { LargeTitle("Songs", "${songs.size} songs · $sortSubtitle", p) }
+        item {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("YOUR SOUNDTRACK", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = p.accent, letterSpacing = 1.5.sp)
+                        Text("Your music", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = p.text)
+                        Text("${songs.size} tracks · $sortSubtitle", fontSize = 13.sp, color = p.secondary)
+                    }
+                    Box(Modifier.size(44.dp).clip(CircleShape).background(p.selectedPill), contentAlignment = Alignment.Center) {
+                        GlyphIcon(Glyph.Note, p.accent, Modifier.size(22.dp))
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                val featured = current ?: songs.firstOrNull()
+                if (featured != null) {
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+                            .background(Brush.linearGradient(listOf(p.accent.copy(alpha = 0.30f), p.card, p.card)))
+                            .clickable { onPlay(songs.indexOfFirst { it.id == featured.id }.coerceAtLeast(0)) }
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Cover(featured, Modifier.size(88.dp), 16.dp, p, 400)
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(if (current != null) "NOW PLAYING" else "PICK UP THE VIBE", fontSize = 10.sp, color = p.accent, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            Spacer(Modifier.height(4.dp))
+                            Text(featured.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = p.text)
+                            Text(featured.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = p.secondary)
+                            Spacer(Modifier.height(8.dp))
+                            Text(if (current != null && current.id == featured.id) "Open player  ›" else "Play track  ›", color = p.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("All tracks" to "${songs.size}", "Favorites" to "${favSet.size}", "Playlists" to "Library").forEach { (label, value) ->
+                        Column(Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(p.card).padding(horizontal = 10.dp, vertical = 11.dp)) {
+                            Text(value, color = p.accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text(label, color = p.secondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+            SectionHeader("All tracks", "", p) { }
+        }
         itemsIndexed(songs, key = { _, s -> s.id }) { index, song ->
             SongRow(
                 song = song,
@@ -362,10 +407,12 @@ fun SectionHeader(title: String, action: String, p: Palette, onAction: () -> Uni
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(title, Modifier.weight(1f), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = p.text)
-        Box(
-            Modifier.clip(RoundedCornerShape(20.dp)).clickable { onAction() }
-                .padding(horizontal = 10.dp, vertical = 6.dp)
-        ) { Text(action, color = p.accent, fontSize = 15.sp, fontWeight = FontWeight.Medium) }
+        if (action.isNotBlank()) {
+            Box(
+                Modifier.clip(RoundedCornerShape(20.dp)).clickable { onAction() }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) { Text(action, color = p.accent, fontSize = 15.sp, fontWeight = FontWeight.Medium) }
+        }
     }
 }
 
@@ -377,9 +424,6 @@ fun ProfileTab(
     p: Palette,
     topPad: Dp,
     bottomPad: Dp,
-    onPickPhoto: () -> Unit,
-    onPickAvatarVideo: () -> Unit,
-    onPickBannerVideo: () -> Unit,
     onEdit: () -> Unit,
     onSettings: () -> Unit,
     onFavorites: () -> Unit,
@@ -403,13 +447,13 @@ fun ProfileTab(
         item {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 if (profile.bannerVideoPath.isNotBlank()) {
-                    LoopingProfileVideo(profile.bannerVideoPath, Modifier.fillMaxWidth().height(130.dp).clip(RoundedCornerShape(18.dp)))
+                    LoopingProfileVideo(profile.bannerVideoPath, Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(18.dp)))
                 } else {
                     Box(Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(18.dp)).background(p.card), contentAlignment = Alignment.Center) {
                         Text("Profile banner", color = p.secondary)
                     }
                 }
-                Text("Change animated banner (MP4 · max 50 MB)", color = p.accent, modifier = Modifier.clickable { onPickBannerVideo() }.padding(vertical = 8.dp), fontSize = 13.sp)
+                // Profile media is managed from Settings only.
             }
         }
         item {
@@ -418,26 +462,17 @@ fun ProfileTab(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 if (profile.avatarVideoPath.isNotBlank()) {
-                    LoopingProfileVideo(profile.avatarVideoPath, Modifier.size(104.dp).clip(CircleShape).clickable { onPickAvatarVideo() })
+                    LoopingProfileVideo(profile.avatarVideoPath, Modifier.size(112.dp).clip(CircleShape))
                 } else {
                     Avatar(
                         photo = profile.photo,
                         name = profile.name,
                         p = p,
-                        modifier = Modifier.size(104.dp).clickable { onPickPhoto() },
+                        modifier = Modifier.size(112.dp),
                         textSize = 42.sp
                     )
                 }
-                Text("Use animated profile video (MP4 · max 50 MB)", color = p.accent, fontSize = 12.sp,
-                    modifier = Modifier.clickable { onPickAvatarVideo() }.padding(top = 6.dp))
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    if (profile.photo == null) "Add photo" else "Change photo",
-                    color = p.accent, fontSize = 14.sp,
-                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable { onPickPhoto() }
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(8.dp))
                 Text(
                     profile.name.ifBlank { "Your name" },
                     fontSize = 24.sp, fontWeight = FontWeight.Bold,
@@ -447,7 +482,7 @@ fun ProfileTab(
                     Text("@${profile.username}", fontSize = 15.sp, color = p.secondary)
                 }
                 Text(
-                    profile.bio.ifBlank { "Tap Edit profile to add a bio." },
+                    profile.bio.ifBlank { "Your music space. Add a bio to tell listeners about yourself." },
                     fontSize = 14.sp, color = p.secondary,
                     modifier = Modifier.padding(horizontal = 32.dp, vertical = 6.dp)
                 )
@@ -463,7 +498,16 @@ fun ProfileTab(
         }
         item {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                ProfileAction("Settings", "Manage media", p, Modifier.weight(1f), onSettings)
+                ProfileAction("Favorites", "Your liked tracks", p, Modifier.weight(1f), onFavorites)
+            }
+        }
+        item {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 listOf(
@@ -547,6 +591,18 @@ fun ProfileTab(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ProfileAction(title: String, subtitle: String, p: Palette, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Column(
+        modifier.clip(RoundedCornerShape(16.dp)).background(p.card).clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        Text(title, color = p.text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        Text(subtitle, color = p.secondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

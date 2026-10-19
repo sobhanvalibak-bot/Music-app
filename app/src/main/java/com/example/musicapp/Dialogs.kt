@@ -223,14 +223,24 @@ fun EditSongDialog(
                     TextButton(enabled = enabled && !onlineBusy, onClick = {
                         onlineBusy = true; onlineMessage = "Searching online…"
                         scope.launch {
-                            val info = AutoMusicLookup.songInfo(title.ifBlank { song.title }, artist.ifBlank { song.artist })
+                            var lookupFailure: String? = null
+                            val info = try {
+                                AutoMusicLookup.songInfo(title.ifBlank { song.title }, artist.ifBlank { song.artist })
+                            } catch (e: Exception) {
+                                lookupFailure = e.message
+                                null
+                            }
                             if (info != null) {
                                 title = info.title; artist = info.artist; album = info.album
                                 genre = info.genre; year = info.year
                                 val coverSaved = AutoMusicLookup.downloadCover(context, song.id, info.artworkUrl)
                                 if (coverSaved) invalidateSongCover(song.id)
                                 onlineMessage = if (coverSaved) "Metadata and album cover downloaded for this app." else "Metadata found; no cover image was available."
-                            } else onlineMessage = "No match found. Check internet and try again."
+                            } else onlineMessage = if (lookupFailure != null) {
+                                "Online lookup failed (${lookupFailure}). Check connection, VPN or try again later."
+                            } else {
+                                "No matching track found in the online catalog. Try a shorter title or include the artist."
+                            }
                             onlineBusy = false
                         }
                     }) { Text(if (onlineBusy) "Searching…" else "Auto-fill online", color = p.accent) }

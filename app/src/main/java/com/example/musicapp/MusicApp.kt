@@ -166,7 +166,7 @@ fun MusicApp(
 
     // While typing in search the keyboard needs the space, so the bars slide away too.
     val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-    val barsShown = !(searching && imeOpen)
+    val barsShown = barsVisible && !(searching && imeOpen)
 
     // Mini player and tab bar slide down off the screen and come back up with a spring.
     val miniHide by animateFloatAsState(
@@ -379,13 +379,6 @@ fun MusicApp(
                         p = p,
                         topPad = topPad,
                         bottomPad = bottomPad,
-                        onPickPhoto = {
-                            photoPicker.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        },
-                        onPickAvatarVideo = { avatarVideoPicker.launch("video/mp4") },
-                        onPickBannerVideo = { bannerVideoPicker.launch("video/mp4") },
                         onEdit = { showEdit = true },
                         onSettings = { sub = Sub.Settings },
                         onFavorites = { sub = Sub.Favorites },
@@ -393,7 +386,19 @@ fun MusicApp(
                         onNewPlaylist = { showNewPlaylist = true },
                         onPlayFavorites = { list, i -> playQueue(list, i) }
                     )
-                    is Sub.Settings -> SettingsTab(settings, p, topPad, bottomPad) { sub = Sub.None }
+                    is Sub.Settings -> SettingsTab(
+                        settings = settings,
+                        p = p,
+                        topPad = topPad,
+                        bottomPad = bottomPad,
+                        profile = profile,
+                        onPickPhoto = {
+                            photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                        onPickAvatarVideo = { avatarVideoPicker.launch("video/mp4") },
+                        onPickBannerVideo = { bannerVideoPicker.launch("video/mp4") },
+                        onBack = { sub = Sub.None }
+                    )
                     is Sub.Favorites -> {
                         val favSongs = profile.favorites.reversed().mapNotNull { byId[it] }
                         SongListPage(
