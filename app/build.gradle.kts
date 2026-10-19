@@ -44,6 +44,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-session:1.4.1")
+    implementation("androidx.media3:media3-ui:1.4.1")
     // Reads and writes the real tags inside mp3 / m4a / flac / ogg files (Android build of jaudiotagger)
     implementation("com.github.AdrienPoupa:jaudiotagger:2.2.3")
 }
