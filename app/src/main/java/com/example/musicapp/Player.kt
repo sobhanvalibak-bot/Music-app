@@ -1,11 +1,20 @@
 package com.example.musicapp
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -44,8 +53,15 @@ fun FullPlayer(
     onRepeat: () -> Unit,
     onFav: () -> Unit,
     onAddToPlaylist: () -> Unit,
-    onArtist: (String) -> Unit
+    onArtist: (String) -> Unit,
+    albumSongs: List<Song>,
+    onPlayAlbumSong: (Int) -> Unit,
+    onEdit: () -> Unit
 ) {
+    var showAlbum by remember { mutableStateOf(false) }
+    val showAlbumNow by rememberUpdatedState(showAlbum)
+    BackHandler(enabled = showAlbum) { showAlbum = false }
+
     var dragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
     val duration = song.durationMs
@@ -61,13 +77,17 @@ fun FullPlayer(
     Box(
         Modifier
             .fillMaxSize()
-            .background(p.bg)
-            .background(Brush.verticalGradient(listOf(p.accent.copy(alpha = 0.32f), Color.Transparent)))
+            .background(p.bgBrush)
+            .background(
+                Brush.verticalGradient(
+                    listOf(p.accent.copy(alpha = if (p.tinted) 0.20f else 0.32f), Color.Transparent)
+                )
+            )
             .pointerInput(Unit) {
                 var total = 0f
                 detectVerticalDragGestures(
                     onDragStart = { total = 0f },
-                    onDragEnd = { if (total > 220f) onClose() },
+                    onDragEnd = { if (total > 220f && !showAlbumNow) onClose() },
                     onDragCancel = { total = 0f },
                     onVerticalDrag = { _, d -> total += d }
                 )
@@ -93,7 +113,10 @@ fun FullPlayer(
                 Spacer(Modifier.weight(1f))
                 Text("Now Playing", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = p.secondary)
                 Spacer(Modifier.weight(1f))
-                Spacer(Modifier.size(44.dp))
+                Box(
+                    Modifier.size(44.dp).clip(CircleShape).clickable { onEdit() },
+                    contentAlignment = Alignment.Center
+                ) { GlyphIcon(Glyph.Edit, p.text, Modifier.size(20.dp)) }
             }
 
             Spacer(Modifier.weight(0.5f))
@@ -101,7 +124,7 @@ fun FullPlayer(
             Cover(
                 song,
                 Modifier
-                    .fillMaxWidth(0.9f)
+                    .fillMaxWidth(0.86f)
                     .aspectRatio(1f)
                     .graphicsLayer {
                         scaleX = coverScale
@@ -134,6 +157,24 @@ fun FullPlayer(
                                 }
                             }
                         }
+                    }
+                    // Album: tap to see every song of this album
+                    Row(
+                        Modifier
+                            .padding(top = 6.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(p.selectedPill)
+                            .clickable { showAlbum = true }
+                            .padding(start = 10.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        GlyphIcon(Glyph.Album, p.accent, Modifier.size(15.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            song.album, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                            color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 200.dp)
+                        )
                     }
                 }
                 Box(
@@ -218,6 +259,105 @@ fun FullPlayer(
             }
 
             Spacer(Modifier.weight(0.6f))
+        }
+
+        // Album page that slides up over the player
+        AnimatedVisibility(
+            visible = showAlbum,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+        ) {
+            AlbumPanel(
+                song = song,
+                songs = albumSongs,
+                p = p,
+                onClose = { showAlbum = false },
+                onPlay = onPlayAlbumSong
+            )
+        }
+    }
+}
+
+@Composable
+private fun AlbumPanel(
+    song: Song,
+    songs: List<Song>,
+    p: Palette,
+    onClose: () -> Unit,
+    onPlay: (Int) -> Unit
+) {
+    val first = songs.firstOrNull() ?: song
+    val totalMs = songs.sumOf { it.durationMs }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(p.bgBrush)
+            .pointerInput(Unit) { detectTapGestures { } }
+            .statusBarsPadding()
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 20.dp, top = 10.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier.size(44.dp).clip(CircleShape).clickable { onClose() },
+                contentAlignment = Alignment.Center
+            ) { GlyphIcon(Glyph.ChevronDown, p.text, Modifier.size(24.dp)) }
+            Spacer(Modifier.width(6.dp))
+            Cover(first, Modifier.size(64.dp), 12.dp, p, 300)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    song.album, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    fontSize = 20.sp, fontWeight = FontWeight.Bold, color = p.text
+                )
+                Text(
+                    song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    fontSize = 14.sp, color = p.accent
+                )
+                Text(
+                    "${songs.size} songs · ${formatTime(totalMs)}",
+                    fontSize = 12.sp, color = p.secondary
+                )
+            }
+        }
+        LazyColumn(
+            Modifier.weight(1f),
+            contentPadding = PaddingValues(
+                bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 16.dp
+            )
+        ) {
+            itemsIndexed(songs, key = { _, s -> s.id }) { index, s ->
+                val playing = s.id == song.id
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { onPlay(index) }
+                        .padding(horizontal = 20.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(Modifier.width(30.dp), contentAlignment = Alignment.CenterStart) {
+                        if (playing) {
+                            GlyphIcon(Glyph.Play, p.accent, Modifier.size(14.dp))
+                        } else {
+                            Text("${index + 1}", fontSize = 14.sp, color = p.secondary)
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            s.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                            color = if (playing) p.accent else p.text
+                        )
+                        Text(
+                            s.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            fontSize = 13.sp, color = p.secondary
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(formatTime(s.durationMs), fontSize = 13.sp, color = p.secondary)
+                }
+            }
         }
     }
 }

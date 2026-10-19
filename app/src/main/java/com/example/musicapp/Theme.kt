@@ -31,7 +31,9 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -39,21 +41,94 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.PI
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 
 // ───────────────────────── Theme / Liquid Glass ─────────────────────────
 
-class Palette(val dark: Boolean, val accent: Color, glass: Float, val corner: Float) {
-    val bg = if (dark) Color(0xFF000000) else Color(0xFFF2F2F7)
-    val card = if (dark) Color(0xFF1C1C1E) else Color.White
-    val segment = if (dark) Color(0xFF636366) else Color.White
-    val text = if (dark) Color.White else Color.Black
-    val secondary = Color(0xFF8E8E93)
-    val glassTop = if (dark) Color(0xFF3A3A3C).copy(alpha = glass) else Color.White.copy(alpha = glass)
-    val glassBottom = (if (dark) Color(0xFF1C1C1E) else Color(0xFFF7F7FA))
-        .copy(alpha = (glass - 0.14f).coerceAtLeast(0.2f))
-    val selectedPill = if (dark) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.07f)
-    val coverTop = if (dark) Color(0xFF3A3A3C) else Color(0xFFE5E5EA)
-    val coverBottom = if (dark) Color(0xFF2C2C2E) else Color(0xFFD1D1D6)
+/**
+ * Colours for the whole app.
+ * When [tint] is given (the "Cover" theme) the background, cards, glass, accent and the
+ * selected highlight are all derived from the colour of the playing song's cover.
+ */
+class Palette(
+    val dark: Boolean,
+    baseAccent: Color,
+    glass: Float,
+    val corner: Float,
+    tint: Color? = null
+) {
+    val tinted = tint != null
+
+    private val hsv = FloatArray(3).also {
+        if (tint != null) android.graphics.Color.colorToHSV(tint.toArgb(), it)
+    }
+    private val hue = hsv[0]
+    // keep grey covers grey, give coloured covers a strong, readable saturation
+    private val sat = if (!tinted) 0f else if (hsv[1] < 0.08f) hsv[1] else hsv[1].coerceIn(0.4f, 0.9f)
+
+    private fun tone(satScale: Float, value: Float): Color =
+        Color(android.graphics.Color.HSVToColor(floatArrayOf(hue, (sat * satScale).coerceIn(0f, 1f), value)))
+
+    val accent: Color = if (tinted) tone(0.8f, 0.97f) else baseAccent
+    val bg: Color = if (tinted) tone(0.9f, 0.17f) else if (dark) Color(0xFF000000) else Color(0xFFF2F2F7)
+    val bgTop: Color = if (tinted) tone(0.85f, 0.31f) else bg
+    val bgBrush: Brush = Brush.verticalGradient(listOf(bgTop, bg))
+    val card: Color = if (tinted) tone(0.75f, 0.29f) else if (dark) Color(0xFF1C1C1E) else Color.White
+    val segment: Color = if (tinted) tone(0.7f, 0.42f) else if (dark) Color(0xFF636366) else Color.White
+    val text: Color = if (dark) Color.White else Color.Black
+    val secondary: Color = if (tinted) Color.White.copy(alpha = 0.62f) else Color(0xFF8E8E93)
+    val glassTop: Color =
+        if (tinted) tone(0.7f, 0.38f).copy(alpha = glass)
+        else if (dark) Color(0xFF3A3A3C).copy(alpha = glass) else Color.White.copy(alpha = glass)
+    val glassBottom: Color =
+        (if (tinted) tone(0.8f, 0.22f) else if (dark) Color(0xFF1C1C1E) else Color(0xFFF7F7FA))
+            .copy(alpha = (glass - 0.14f).coerceAtLeast(0.2f))
+    val selectedPill: Color = if (dark) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.07f)
+    val coverTop: Color = if (tinted) tone(0.6f, 0.40f) else if (dark) Color(0xFF3A3A3C) else Color(0xFFE5E5EA)
+    val coverBottom: Color = if (tinted) tone(0.7f, 0.28f) else if (dark) Color(0xFF2C2C2E) else Color(0xFFD1D1D6)
+}
+
+/**
+ * Finds the main colour of a song's cover (weighted towards vivid, bright pixels).
+ * Returns null when the song has no cover.
+ */
+suspend fun songTint(context: Context, song: Song): Color? = withContext(Dispatchers.Default) {
+    try {
+        val img = loadArt(context, song, 96) ?: return@withContext null
+        val src = img.asAndroidBitmap()
+        val soft = if (src.config == Bitmap.Config.HARDWARE) src.copy(Bitmap.Config.ARGB_8888, false) else src
+        val n = 24
+        val small = Bitmap.createScaledBitmap(soft, n, n, true)
+        val px = IntArray(n * n)
+        small.getPixels(px, 0, n, 0, 0, n, n)
+        val hsv = FloatArray(3)
+        var wSum = 0f
+        var cx = 0f
+        var cy = 0f
+        var sSum = 0f
+        for (c in px) {
+            android.graphics.Color.colorToHSV(c, hsv)
+            val w = hsv[1] * hsv[2]
+            val rad = hsv[0] * PI.toFloat() / 180f
+            cx += cos(rad) * w
+            cy += sin(rad) * w
+            sSum += hsv[1] * w
+            wSum += w
+        }
+        if (wSum / px.size < 0.04f) {
+            // black-and-white cover
+            Color(android.graphics.Color.HSVToColor(floatArrayOf(0f, 0f, 0.6f)))
+        } else {
+            var h = atan2(cy, cx) * 180f / PI.toFloat()
+            if (h < 0f) h += 360f
+            Color(android.graphics.Color.HSVToColor(floatArrayOf(h, (sSum / wSum).coerceIn(0f, 1f), 0.8f)))
+        }
+    } catch (e: Exception) {
+        null
+    }
 }
 
 /** iOS-style "liquid glass": translucent fill, specular rim light, soft shadow. */
@@ -171,7 +246,7 @@ fun Cover(
 
 // ───────────────────────── Icons (drawn, no extra deps) ─────────────────────────
 
-enum class Glyph { Note, Album, Artist, Tune, Play, Pause, Next, Heart, HeartOutline, Back, Close, Plus, Prev, Shuffle, Repeat, ChevronDown }
+enum class Glyph { Note, Album, Artist, Tune, Play, Pause, Next, Heart, HeartOutline, Back, Close, Plus, Prev, Shuffle, Repeat, ChevronDown, Edit, Search }
 
 @Composable
 fun GlyphIcon(glyph: Glyph, color: Color, modifier: Modifier = Modifier) {
@@ -308,6 +383,15 @@ fun GlyphIcon(glyph: Glyph, color: Color, modifier: Modifier = Modifier) {
                 val sw = w * 0.11f
                 drawLine(color, Offset(w * 0.15f, h * 0.35f), Offset(w * 0.5f, h * 0.68f), sw, StrokeCap.Round)
                 drawLine(color, Offset(w * 0.5f, h * 0.68f), Offset(w * 0.85f, h * 0.35f), sw, StrokeCap.Round)
+            }
+            Glyph.Edit -> {
+                drawLine(color, Offset(w * 0.30f, h * 0.68f), Offset(w * 0.76f, h * 0.22f), w * 0.15f, StrokeCap.Round)
+                drawLine(color, Offset(w * 0.14f, h * 0.90f), Offset(w * 0.86f, h * 0.90f), w * 0.07f, StrokeCap.Round)
+            }
+            Glyph.Search -> {
+                val sw = w * 0.10f
+                drawCircle(color, radius = w * 0.28f, center = Offset(w * 0.44f, h * 0.44f), style = Stroke(sw))
+                drawLine(color, Offset(w * 0.65f, h * 0.65f), Offset(w * 0.88f, h * 0.88f), sw, StrokeCap.Round)
             }
             Glyph.Next -> {
                 val path = Path().apply {

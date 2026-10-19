@@ -37,7 +37,9 @@ data class Song(
     val dateAdded: Long,
     val uri: Uri,
     /** Artist names split on ',', '&' and '_' so every artist gets their own page. */
-    val artists: List<String> = splitArtists(artist)
+    val artists: List<String> = splitArtists(artist),
+    /** Track number from the file's tag (disc * 1000 + track on some files), 0 if unknown. */
+    val track: Int = 0
 )
 
 fun splitArtists(raw: String): List<String> =
@@ -76,7 +78,8 @@ fun loadSongs(context: Context): List<Song> {
         MediaStore.Audio.Media.ALBUM,
         MediaStore.Audio.Media.ALBUM_ID,
         MediaStore.Audio.Media.DURATION,
-        MediaStore.Audio.Media.DATE_ADDED
+        MediaStore.Audio.Media.DATE_ADDED,
+        MediaStore.Audio.Media.TRACK
     )
     val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
     val sort = "${MediaStore.Audio.Media.DATE_ADDED} DESC"
@@ -89,6 +92,7 @@ fun loadSongs(context: Context): List<Song> {
         val albumIdCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
         val durCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
         val addedCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+        val trackCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK)
         while (c.moveToNext()) {
             val id = c.getLong(idCol)
             val artist = c.getString(artistCol)?.takeIf { it != "<unknown>" } ?: "Unknown Artist"
@@ -101,7 +105,8 @@ fun loadSongs(context: Context): List<Song> {
                 albumId = c.getLong(albumIdCol),
                 durationMs = c.getLong(durCol),
                 dateAdded = c.getLong(addedCol),
-                uri = ContentUris.withAppendedId(collection, id)
+                uri = ContentUris.withAppendedId(collection, id),
+                track = c.getInt(trackCol)
             )
         }
     }
@@ -118,7 +123,7 @@ val AccentColors: List<Color> = listOf(
     0xFFFA2D48, 0xFFFF9500, 0xFF34C759, 0xFF0A84FF, 0xFFBF5AF2, 0xFF64D2FF
 ).map { Color(it) }
 
-val ThemeLabels = listOf("System", "Light", "Dark")
+val ThemeLabels = listOf("System", "Light", "Dark", "Cover")
 val SortLabels = listOf("Newest", "Oldest", "A–Z")
 val SortSubtitles = listOf("Newest first", "Oldest first", "A to Z")
 

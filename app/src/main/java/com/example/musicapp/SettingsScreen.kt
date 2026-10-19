@@ -75,6 +75,13 @@ fun SettingsTab(settings: Settings, p: Palette, topPad: Dp, bottomPad: Dp, onBac
         item {
             SettingsCard("Appearance", p) {
                 Segmented(ThemeLabels, settings.theme, p) { settings.changeTheme(it) }
+                if (settings.theme == 3) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Background, buttons and highlights take their colour from the cover of the song that is playing.",
+                        fontSize = 13.sp, color = p.secondary
+                    )
+                }
             }
         }
         item {

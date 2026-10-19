@@ -1,22 +1,28 @@
 package com.example.musicapp
 
 import android.Manifest
+import android.app.Activity
 import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -29,7 +35,9 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,7 +52,12 @@ import kotlinx.coroutines.launch
 // ───────────────────────── Screens ─────────────────────────
 
 @Composable
-fun MusicApp(p: Palette, settings: Settings, openPlayerSignal: Int = 0) {
+fun MusicApp(
+    p: Palette,
+    settings: Settings,
+    openPlayerSignal: Int = 0,
+    onTint: (Color?) -> Unit = {}
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val profile = remember { ProfileStore(context) }
@@ -65,6 +78,37 @@ fun MusicApp(p: Palette, settings: Settings, openPlayerSignal: Int = 0) {
         ActivityResultContracts.PickVisualMedia()
     ) { uri -> if (uri != null) scope.launch { profile.savePhoto(uri) } }
 
+    // Editing song info: tags are written into the audio file, which Android only allows after
+    // the user agrees (Android 10+: system dialog, Android 9-: storage permission).
+    var songsVersion by remember { mutableIntStateOf(0) }
+    var editTarget by remember { mutableStateOf<Song?>(null) }
+    var pendingEdit by remember { mutableStateOf<Pair<Song, TagEdit>?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    var retryTick by remember { mutableIntStateOf(0) }
+    var grantAsked by remember { mutableStateOf(false) }
+    val grantLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { r ->
+        if (r.resultCode == Activity.RESULT_OK) {
+            retryTick++
+        } else {
+            saving = false
+            pendingEdit = null
+            Toast.makeText(context, "Not allowed, the file was not changed", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val storageLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { ok ->
+        if (ok) {
+            retryTick++
+        } else {
+            saving = false
+            pendingEdit = null
+            Toast.makeText(context, "Storage permission is needed to edit the file", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     LaunchedEffect(granted) {
         if (granted && Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
@@ -83,7 +127,10 @@ fun MusicApp(p: Palette, settings: Settings, openPlayerSignal: Int = 0) {
     var showPlayer by remember { mutableStateOf(false) }
     var artistPage by remember { mutableStateOf<String?>(null) }
     var barsVisible by remember { mutableStateOf(true) }
+    var searching by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
 
+    BackHandler(enabled = searching) { searching = false }
     BackHandler(enabled = tab == 3 && sub != Sub.None) { sub = Sub.None }
     BackHandler(enabled = artistPage != null) { artistPage = null }
     BackHandler(enabled = showPlayer) { showPlayer = false }
@@ -91,13 +138,35 @@ fun MusicApp(p: Palette, settings: Settings, openPlayerSignal: Int = 0) {
     // Scrolling content down hides the bars, scrolling back up brings them back.
     val barsScroll = remember {
         object : NestedScrollConnection {
+            var acc = 0f
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (available.y < -6f) barsVisible = false
-                else if (available.y > 6f) barsVisible = true
+                val dy = available.y
+                if (dy == 0f) return Offset.Zero
+                // reset the sum when the direction changes
+                if ((dy < 0f && acc > 0f) || (dy > 0f && acc < 0f)) acc = 0f
+                acc += dy
+                if (acc < -40f) barsVisible = false
+                else if (acc > 40f) barsVisible = true
                 return Offset.Zero
             }
         }
     }
+
+    // While typing in search the keyboard needs the space, so the bars slide away too.
+    val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val barsShown = barsVisible && !(searching && imeOpen)
+
+    // Mini player and tab bar slide down off the screen and come back up with a spring.
+    val miniHide by animateFloatAsState(
+        if (barsShown) 0f else 1f,
+        spring(dampingRatio = 0.8f, stiffness = 260f),
+        label = "miniHide"
+    )
+    val tabHide by animateFloatAsState(
+        if (barsShown) 0f else 1f,
+        spring(dampingRatio = 0.85f, stiffness = 380f),
+        label = "tabHide"
+    )
 
     if (!granted) {
         Column(
@@ -120,7 +189,7 @@ fun MusicApp(p: Palette, settings: Settings, openPlayerSignal: Int = 0) {
         return
     }
 
-    val songs = remember { loadSongs(context) }
+    val songs = remember(songsVersion) { loadSongs(context) }
     val byId = remember(songs) { songs.associateBy { it.id } }
     val sorted = remember(songs, settings.sort) {
         when (settings.sort) {
@@ -201,6 +270,51 @@ fun MusicApp(p: Palette, settings: Settings, openPlayerSignal: Int = 0) {
         c.setMediaItems(queue.map { it.toMediaItem() }, index, 0L)
         c.prepare()
         c.play()
+    }
+
+    // "Cover" theme: take the colour from the cover of the song that is playing.
+    LaunchedEffect(current?.id, settings.theme) {
+        if (settings.theme == 3) onTint(current?.let { songTint(context, it) })
+    }
+
+    // Writes the edited tags into the song file (and asks Android for permission if needed).
+    LaunchedEffect(pendingEdit, retryTick) {
+        val (song, edit) = pendingEdit ?: return@LaunchedEffect
+        saving = true
+        when (val r = TagEditor.save(context, song, edit)) {
+            is SaveResult.Ok -> {
+                Toast.makeText(context, "Saved into the song file", Toast.LENGTH_SHORT).show()
+                pendingEdit = null
+                saving = false
+                editTarget = null
+                songsVersion++
+            }
+            is SaveResult.NeedsGrant -> {
+                if (grantAsked) {
+                    Toast.makeText(context, "Android did not allow changing this file", Toast.LENGTH_LONG).show()
+                    pendingEdit = null
+                    saving = false
+                } else {
+                    grantAsked = true
+                    grantLauncher.launch(IntentSenderRequest.Builder(r.sender).build())
+                }
+            }
+            is SaveResult.NeedsStoragePermission -> {
+                if (grantAsked) {
+                    Toast.makeText(context, "Storage permission is needed to edit the file", Toast.LENGTH_LONG).show()
+                    pendingEdit = null
+                    saving = false
+                } else {
+                    grantAsked = true
+                    storageLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                }
+            }
+            is SaveResult.Error -> {
+                Toast.makeText(context, r.message, Toast.LENGTH_LONG).show()
+                pendingEdit = null
+                saving = false
+            }
+        }
     }
 
     // Tapping the playback notification opens the full player for the current song.
@@ -330,7 +444,12 @@ fun MusicApp(p: Palette, settings: Settings, openPlayerSignal: Int = 0) {
         artistPage?.let { name ->
             val list = artists.firstOrNull { it.name.equals(name, ignoreCase = true) }?.songs
                 ?: emptyList()
-            Box(Modifier.fillMaxSize().background(p.bg)) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(p.bgBrush)
+                    .pointerInput(Unit) { detectTapGestures { } }
+            ) {
                 SongListPage(
                     title = name,
                     subtitle = "${list.size} songs",
@@ -351,19 +470,39 @@ fun MusicApp(p: Palette, settings: Settings, openPlayerSignal: Int = 0) {
             }
         }
 
-        AnimatedVisibility(
-            visible = barsVisible,
-            modifier = Modifier.align(Alignment.BottomCenter),
-            enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
-            exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 })
+        // Search page
+        if (searching) {
+            SearchScreen(
+                songs = songs,
+                current = current,
+                favSet = favSet,
+                p = p,
+                showDuration = showDuration,
+                query = query,
+                onQuery = { query = it },
+                topPad = topPad,
+                bottomPad = bottomPad,
+                onClose = { searching = false },
+                onPlay = { list, i -> playQueue(list, i) },
+                onToggleFav = { profile.toggleFavorite(it.id) },
+                onLong = { addTarget = it }
+            )
+        }
+
+        Column(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column(
-                Modifier
-                    .navigationBarsPadding()
-                    .padding(bottom = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                current?.let { song ->
+            current?.let { song ->
+                Box(
+                    Modifier.graphicsLayer {
+                        translationY = miniHide * (size.height + 160.dp.toPx())
+                        alpha = 1f - miniHide * 0.5f
+                    }
+                ) {
                     MiniPlayer(
                         song = song,
                         isPlaying = isPlaying,
@@ -376,12 +515,32 @@ fun MusicApp(p: Palette, settings: Settings, openPlayerSignal: Int = 0) {
                         onNext = {
                             controller?.let { if (it.hasNextMediaItem()) it.seekToNextMediaItem() }
                         },
+                        onPrev = {
+                            controller?.let {
+                                if (it.hasPreviousMediaItem()) it.seekToPreviousMediaItem() else it.seekTo(0)
+                            }
+                        },
+                        canNext = { controller?.hasNextMediaItem() == true },
                         onFav = { profile.toggleFavorite(song.id) }
                     )
                 }
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp)
+                    .graphicsLayer {
+                        translationY = tabHide * (size.height + 120.dp.toPx())
+                        alpha = 1f - tabHide * 0.5f
+                    },
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 GlassTabBar(
-                    selected = tab,
+                    modifier = Modifier.weight(1f),
+                    selected = if (searching) -1 else tab,
                     onSelect = {
+                        searching = false
                         sub = Sub.None
                         artistPage = null
                         barsVisible = true
@@ -391,6 +550,10 @@ fun MusicApp(p: Palette, settings: Settings, openPlayerSignal: Int = 0) {
                     photo = profile.photo,
                     profileName = profile.name
                 )
+                SearchButton(active = searching, p = p) {
+                    barsVisible = true
+                    searching = true
+                }
             }
         }
 
@@ -401,6 +564,11 @@ fun MusicApp(p: Palette, settings: Settings, openPlayerSignal: Int = 0) {
             exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
         ) {
             current?.let { song ->
+                // every song of the album that is playing, in track order
+                val albumSongs = remember(song.albumId, songs) {
+                    songs.filter { it.albumId == song.albumId }
+                        .sortedWith(compareBy<Song>({ it.track % 1000 }, { it.title.lowercase() }))
+                }
                 FullPlayer(
                     song = song,
                     isPlaying = isPlaying,
@@ -443,7 +611,10 @@ fun MusicApp(p: Palette, settings: Settings, openPlayerSignal: Int = 0) {
                     onArtist = { name ->
                         showPlayer = false
                         artistPage = name
-                    }
+                    },
+                    albumSongs = albumSongs,
+                    onPlayAlbumSong = { i -> playQueue(albumSongs, i) },
+                    onEdit = { editTarget = song }
                 )
             }
         }
@@ -464,7 +635,23 @@ fun MusicApp(p: Palette, settings: Settings, openPlayerSignal: Int = 0) {
                 Toast.makeText(context, "Added to ${pl.name}", Toast.LENGTH_SHORT).show()
                 addTarget = null
             },
-            onDismiss = { addTarget = null }
+            onDismiss = { addTarget = null },
+            onEdit = {
+                editTarget = song
+                addTarget = null
+            }
+        )
+    }
+    editTarget?.let { song ->
+        EditSongDialog(
+            song = song,
+            p = p,
+            saving = saving,
+            onSave = { edit ->
+                grantAsked = false
+                pendingEdit = song to edit
+            },
+            onDismiss = { if (!saving) editTarget = null }
         )
     }
     if (showNewPlaylist) {

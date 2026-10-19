@@ -7,6 +7,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -28,14 +31,25 @@ class MainActivity : ComponentActivity() {
             val settings = remember {
                 Settings(getSharedPreferences("settings", Context.MODE_PRIVATE))
             }
+            // "Cover" theme: colour of the playing song's cover (null when nothing is playing)
+            var coverTint by remember { mutableStateOf<Color?>(null) }
+            val coverMode = settings.theme == 3
+            val animTint by animateColorAsState(
+                coverTint ?: Color(0xFF3A3A3C),
+                animationSpec = tween(700),
+                label = "coverTint"
+            )
+            val tintNow: Color? = if (coverMode && coverTint != null) animTint else null
+
             val dark = when (settings.theme) {
                 1 -> false
                 2 -> true
+                3 -> true
                 else -> isSystemInDarkTheme()
             }
             val accent = AccentColors[settings.accent.coerceIn(0, AccentColors.lastIndex)]
-            val p = remember(dark, accent, settings.glass, settings.corners) {
-                Palette(dark, accent, settings.glass, settings.corners)
+            val p = remember(dark, accent, settings.glass, settings.corners, tintNow) {
+                Palette(dark, accent, settings.glass, settings.corners, tintNow)
             }
 
             DisposableEffect(dark) {
@@ -51,7 +65,9 @@ class MainActivity : ComponentActivity() {
 
             MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
                 Surface(Modifier.fillMaxSize(), color = p.bg, contentColor = p.text) {
-                    MusicApp(p, settings, openPlayerSignal)
+                    Box(Modifier.fillMaxSize().background(p.bgBrush)) {
+                        MusicApp(p, settings, openPlayerSignal, onTint = { coverTint = it })
+                    }
                 }
             }
         }
