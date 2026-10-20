@@ -345,6 +345,7 @@ fun GlassTabBar(
         "Songs" to Glyph.Note,
         "Albums" to Glyph.Album,
         "Artists" to Glyph.Artist,
+        "Reels" to Glyph.Album,
         "Profile" to Glyph.Artist
     )
     val count = tabs.size
@@ -514,7 +515,7 @@ fun GlassTabBar(
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        if (i == 3) {
+                        if (i == 4) {
                             // Profile tab: the user's own photo, bigger than the other icons
                             Avatar(
                                 photo, profileName, p,
@@ -543,7 +544,7 @@ private fun ClassicTabBar(
     photo: ImageBitmap?,
     profileName: String
 ) {
-    val tabs = listOf("Songs" to Glyph.Note, "Albums" to Glyph.Album, "Artists" to Glyph.Artist, "Profile" to Glyph.Artist)
+    val tabs = listOf("Songs" to Glyph.Note, "Albums" to Glyph.Album, "Artists" to Glyph.Artist, "Reels" to Glyph.Album, "Profile" to Glyph.Artist)
     Row(
         modifier.height(BarHeight).background(Color(0xFF101116)),
         verticalAlignment = Alignment.CenterVertically
@@ -558,7 +559,7 @@ private fun ClassicTabBar(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                if (i == 3) {
+                if (i == 4) {
                     Avatar(photo, profileName, p, Modifier.size(25.dp).then(if (chosen) Modifier.border(1.5.dp, p.accent, CircleShape) else Modifier), 14.sp)
                 } else {
                     GlyphIcon(glyph, if (chosen) p.accent else p.secondary, Modifier.size(23.dp))
@@ -615,7 +616,7 @@ fun formatTime(ms: Long): String {
 }
 
 
-/** Fixed-size cover-only Dynamic Island. Tapping it opens a compact playback control panel. */
+/** Animated, cover-tinted Dynamic Island inspired by the PHP player's island. */
 @Composable
 fun TopIsland(
     song: Song,
@@ -638,91 +639,77 @@ fun TopIsland(
     val statusH = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
     val pillH = islandHeightDp.dp
     val top = ((statusH - pillH) / 2).coerceAtLeast(4.dp)
-    val shape = RoundedCornerShape(50)
-    var menuOpen by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(false) }
     val pop = remember { Animatable(1f) }
+    val width by androidx.compose.animation.core.animateDpAsState(
+        targetValue = if (expanded) 326.dp else islandWidthDp.dp,
+        animationSpec = spring(dampingRatio = 0.68f, stiffness = 360f), label = "islandWidth"
+    )
+    val height by androidx.compose.animation.core.animateDpAsState(
+        targetValue = if (expanded) 126.dp else pillH,
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = 340f), label = "islandHeight"
+    )
+    val corner = if (expanded) 28.dp else 50.dp
     LaunchedEffect(song.id) {
-        pop.snapTo(1.06f)
+        pop.snapTo(1.045f)
         pop.animateTo(1f, spring(dampingRatio = 0.48f, stiffness = 380f))
     }
+    val wave = androidx.compose.animation.core.rememberInfiniteTransition(label = "islandWave")
+    val wavePhase by wave.animateFloat(
+        initialValue = 0.65f, targetValue = 1.15f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = tween(650, easing = LinearEasing), repeatMode = RepeatMode.Reverse
+        ), label = "wavePhase"
+    )
     Box(modifier.fillMaxWidth().padding(top = top), contentAlignment = Alignment.TopCenter) {
-        Row(
+        Column(
             Modifier
                 .graphicsLayer { scaleX = pop.value; scaleY = pop.value }
-                .drawBehind {
-                    drawRoundRect(
-                        brush = Brush.horizontalGradient(listOf(p.accent.copy(alpha = 0.34f), Color.Transparent, p.accent.copy(alpha = 0.18f))),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f),
-                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.4.dp.toPx())
+                .width(width)
+                .height(height)
+                .shadow(if (expanded) 24.dp else 12.dp, RoundedCornerShape(corner), ambientColor = p.accent.copy(alpha = .3f), spotColor = p.accent.copy(alpha = .25f))
+                .clip(RoundedCornerShape(corner))
+                .background(
+                    Brush.linearGradient(
+                        listOf(p.accent.copy(alpha = if (expanded) .96f else .88f), p.accent.copy(alpha = .68f), Color(0xFF101014))
                     )
-                }
-                .pointerInput(song.id) {
-                    var drag = 0f
-                    detectHorizontalDragGestures(
-                        onHorizontalDrag = { change, amount -> change.consume(); drag += amount },
-                        onDragEnd = {
-                            if (drag < -36f) onNext() else if (drag > 36f) onPrev()
-                            drag = 0f
-                        },
-                        onDragCancel = { drag = 0f }
-                    )
-                }
-                .widthIn(min = 180.dp, max = 360.dp)
-                .width(islandWidthDp.dp)
-                .height(pillH)
-                .clip(shape)
-                .background(Color.Black)
-                .border(1.dp, Color.White.copy(alpha = 0.12f), shape)
-                .clickable { menuOpen = true }
-                .padding(horizontal = 5.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Start
+                )
+                .border(1.dp, Color.White.copy(alpha = .22f), RoundedCornerShape(corner))
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 9.dp, vertical = if (expanded) 10.dp else 4.dp),
+            verticalArrangement = Arrangement.spacedBy(if (expanded) 9.dp else 0.dp)
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
-                repeat(4) { i ->
-                    val barHeight = if (isPlaying) listOf(8, 15, 10, 18)[i].dp else 4.dp
-                    Box(Modifier.width(3.dp).height(barHeight).clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = if (isPlaying) 0.92f else 0.45f)))
+            Row(Modifier.fillMaxWidth().height(pillH - 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                // Cover stays on the left, matching the requested island layout.
+                Cover(song, Modifier.size((islandHeightDp - 9).coerceAtLeast(20).dp), 0.dp, p, 200, round = true)
+                Spacer(Modifier.width(8.dp))
+                if (expanded) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+                        Text(song.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(song.artist, color = Color.White.copy(alpha = .72f), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                } else {
+                    Text(song.title, Modifier.weight(1f), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.width(7.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    repeat(5) { i ->
+                        val base = listOf(5, 11, 7, 15, 8)[i].toFloat()
+                        val barHeight = if (isPlaying) (base * wavePhase * (if (i % 2 == 0) 1f else .82f)).dp else 3.dp
+                        Box(Modifier.width(2.5.dp).height(barHeight).clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = if (isPlaying) .96f else .48f)))
+                    }
                 }
             }
-            Spacer(Modifier.weight(1f))
-            Cover(song, Modifier.size((islandHeightDp - 9).coerceAtLeast(20).dp), 0.dp, p, 200, round = true)
-        }
-    }
-    if (menuOpen) {
-        AlertDialog(
-            onDismissRequest = { menuOpen = false },
-            containerColor = Color(0xFF171719),
-            titleContentColor = Color.White,
-            textContentColor = Color.White,
-            title = { Text("Now playing", fontWeight = FontWeight.SemiBold) },
-            text = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(song.title, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
-                            Text(song.artist, color = Color.White.copy(alpha = 0.65f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Cover(song, Modifier.size(58.dp), 0.dp, p, 200, round = true)
-                    }
-                    Spacer(Modifier.height(18.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                        IslandControl(Glyph.Shuffle, if (shuffle) p.accent else Color.White.copy(alpha = 0.7f), "Shuffle", onShuffle)
-                        IslandControl(Glyph.Prev, Color.White, "Previous", onPrev)
-                        IslandControl(if (isPlaying) Glyph.Pause else Glyph.Play, Color.White, if (isPlaying) "Pause" else "Play", onToggle, large = true)
-                        IslandControl(Glyph.Next, Color.White, "Next", onNext)
-                        IslandControl(Glyph.Repeat, if (repeatMode != Player.REPEAT_MODE_OFF) p.accent else Color.White.copy(alpha = 0.7f), if (repeatMode == Player.REPEAT_MODE_ONE) "Repeat one" else "Repeat", onRepeat)
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    TextButton(onClick = onFav) {
-                        GlyphIcon(if (isFav) Glyph.Heart else Glyph.HeartOutline, if (isFav) Color(0xFFFF375F) else Color.White, Modifier.size(20.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(if (isFav) "Remove from favorites" else "Add to favorites", color = Color.White)
-                    }
+            if (expanded) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                    IslandControl(Glyph.Shuffle, if (shuffle) Color.White else Color.White.copy(alpha = .7f), "Shuffle", onShuffle)
+                    IslandControl(Glyph.Prev, Color.White, "Previous", onPrev)
+                    IslandControl(if (isPlaying) Glyph.Pause else Glyph.Play, Color.White, if (isPlaying) "Pause" else "Play", onToggle, large = true)
+                    IslandControl(Glyph.Next, Color.White, "Next", onNext)
+                    IslandControl(Glyph.Repeat, if (repeatMode != Player.REPEAT_MODE_OFF) Color.White else Color.White.copy(alpha = .7f), "Repeat", onRepeat)
                 }
-            },
-            confirmButton = { TextButton(onClick = { menuOpen = false }) { Text("Done", color = p.accent) } }
-        )
+            }
+        }
     }
 }
 

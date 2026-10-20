@@ -185,7 +185,7 @@ fun MusicApp(
     var query by remember { mutableStateOf("") }
 
     BackHandler(enabled = searching) { searching = false }
-    BackHandler(enabled = tab == 3 && sub != Sub.None) { sub = Sub.None }
+    BackHandler(enabled = tab == 4 && sub != Sub.None) { sub = Sub.None }
     BackHandler(enabled = artistPage != null) { artistPage = null }
     BackHandler(enabled = showPlayer) { showPlayer = false }
 
@@ -292,6 +292,25 @@ fun MusicApp(
     var audioInfo by remember { mutableStateOf<AudioInfo?>(null) }
     var queue by remember { mutableStateOf<List<QueueEntry>>(emptyList()) }
     var currentWindow by remember { mutableIntStateOf(-1) }
+
+    var videoGranted by remember {
+        mutableStateOf(Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED)
+    }
+    val videoPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        videoGranted = ok
+        if (ok) tab = 3
+        else Toast.makeText(context, "Allow video access to browse device videos", Toast.LENGTH_LONG).show()
+    }
+    var wasMusicPlayingBeforeVideos by remember { mutableStateOf(false) }
+    LaunchedEffect(tab, controller) {
+        if (tab == 3) {
+            wasMusicPlayingBeforeVideos = controller?.isPlaying == true
+            controller?.pause()
+        } else if (wasMusicPlayingBeforeVideos) {
+            controller?.play()
+            wasMusicPlayingBeforeVideos = false
+        }
+    }
 
     DisposableEffect(Unit) {
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
@@ -451,7 +470,7 @@ fun MusicApp(
 
     Box(Modifier.fillMaxSize().nestedScroll(barsScroll)) {
         Crossfade(targetState = tab, label = "tabs") { t ->
-            if (t == 3) {
+            if (t == 4) {
                 when (val s = sub) {
                     is Sub.None -> ProfileTab(
                         profile = profile,
@@ -529,6 +548,22 @@ fun MusicApp(
                         }
                     }
                 }
+            } else if (t == 3) {
+                VideoFeedScreen(
+                    p = p,
+                    mode = 0,
+                    topPad = topPad,
+                    bottomPad = bottomPad,
+                    onIdentify = { fileName ->
+                        try {
+                            val intent = android.content.Intent(android.content.Intent.ACTION_WEB_SEARCH)
+                                .putExtra(android.app.SearchManager.QUERY, "identify song music in video $fileName")
+                            context.startActivity(intent)
+                        } catch (_: Exception) {
+                            Toast.makeText(context, "Music recognition needs an audio-fingerprint service; web search could not be opened.", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                )
             } else if (songs.isEmpty()) {
                 Box(Modifier.fillMaxSize(), Alignment.Center) {
                     Text("No songs found on this device", color = p.secondary)
@@ -703,7 +738,11 @@ fun MusicApp(
                         sub = Sub.None
                         artistPage = null
                         barsVisible = true
-                        tab = it
+                        if (it == 3 && Build.VERSION.SDK_INT >= 33 && !videoGranted) {
+                            videoPermissionLauncher.launch(Manifest.permission.READ_MEDIA_VIDEO)
+                        } else {
+                            tab = it
+                        }
                     },
                     p = p,
                     photo = profile.photo,
