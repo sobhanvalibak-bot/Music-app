@@ -37,6 +37,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.zIndex
+import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -547,11 +553,36 @@ private fun QueuePanel(
     onMove: (Int, Int) -> Unit,
     onClearUpcoming: () -> Unit
 ) {
-    val curPos = queue.indexOfFirst { it.index == currentWindow }
-    val upcoming = if (curPos >= 0) queue.size - curPos - 1 else 0
+    val haptic = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    // Order shown on screen. While a song is dragged it changes live; it is saved when the finger lifts.
+    var local by remember(queue.map { "${it.index}-${it.song.id}" }) { mutableStateOf(queue) }
+    var draggedKey by remember { mutableStateOf<String?>(null) }
+    var dragOffset by remember { mutableStateOf(0f) }
+    var startPos by remember { mutableStateOf(-1) }
+
+    val curPos = local.indexOfFirst { it.index == currentWindow }
+    val upcoming = if (curPos >= 0) local.size - curPos - 1 else 0
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = if (curPos > 0) curPos - 1 else 0
     )
+
+    fun finishDrag(commit: Boolean) {
+        val key = draggedKey
+        if (commit && key != null) {
+            val end = local.indexOfFirst { "${it.index}-${it.song.id}" == key }
+            if (startPos >= 0 && end >= 0 && end != startPos && startPos < queue.size && end < queue.size) {
+                // playlist positions of the song's old and new place
+                onMove(queue[startPos].index, queue[end].index)
+            }
+        } else {
+            local = queue
+        }
+        draggedKey = null
+        dragOffset = 0f
+        startPos = -1
+    }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -571,7 +602,8 @@ private fun QueuePanel(
             Column(Modifier.weight(1f)) {
                 Text("Queue", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = p.text)
                 Text(
-                    if (shuffle) "${queue.size} songs · Shuffle on" else "${queue.size} songs",
+                    if (shuffle) "${queue.size} songs · Shuffle on"
+                    else "${queue.size} songs · Hold a song and drag to reorder",
                     fontSize = 12.sp, color = p.secondary
                 )
             }
@@ -597,15 +629,80 @@ private fun QueuePanel(
                     bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 16.dp
                 )
             ) {
-                itemsIndexed(queue, key = { _, e -> "${e.index}-${e.song.id}" }) { pos, e ->
+                itemsIndexed(local, key = { _, e -> "${e.index}-${e.song.id}" }) { pos, e ->
+                    val key = "${e.index}-${e.song.id}"
                     val playing = e.index == currentWindow
                     val played = curPos >= 0 && pos < curPos
+                    val dragging = draggedKey == key
+
+                    // hold the song, then move your finger up or down (only while shuffle is off,
+                    // because then the order on screen is the real playlist order)
+                    val dragMod = if (shuffle) Modifier else Modifier.pointerInput(key) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                draggedKey = key
+                                startPos = local.indexOfFirst { "${it.index}-${it.song.id}" == key }
+                                dragOffset = 0f
+                            },
+                            onDrag = { change, amount ->
+                                change.consume()
+                                dragOffset += amount.y
+                                val info = listState.layoutInfo
+                                val cur = info.visibleItemsInfo.firstOrNull { it.key == key }
+                                if (cur != null) {
+                                    val center = cur.offset + cur.size / 2f + dragOffset
+                                    val target = info.visibleItemsInfo.firstOrNull {
+                                        it.key != key && center > it.offset && center < it.offset + it.size
+                                    }
+                                    if (target != null) {
+                                        val from = cur.index
+                                        val to = target.index
+                                        val list = local.toMutableList()
+                                        list.add(to, list.removeAt(from))
+                                        local = list
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        val newOffset = if (to > from) cur.offset + target.size else target.offset
+                                        dragOffset += cur.offset - newOffset
+                                    }
+                                    // scroll when the finger reaches the top or bottom edge
+                                    val top = cur.offset + dragOffset
+                                    val bottom = top + cur.size
+                                    when {
+                                        top < info.viewportStartOffset + 40 -> scope.launch { listState.scrollBy(-26f) }
+                                        bottom > info.viewportEndOffset - 40 -> scope.launch { listState.scrollBy(26f) }
+                                    }
+                                }
+                            },
+                            onDragEnd = { finishDrag(true) },
+                            onDragCancel = { finishDrag(false) }
+                        )
+                    }
+                    val lift by animateFloatAsState(
+                        if (dragging) 1f else 0f,
+                        spring(dampingRatio = 0.6f, stiffness = 500f), label = "queueLift"
+                    )
                     Row(
-                        Modifier
+                        (if (dragging) Modifier else Modifier.animateItem())
                             .fillMaxWidth()
+                            .zIndex(if (dragging) 1f else 0f)
+                            .graphicsLayer {
+                                translationY = if (dragging) dragOffset else 0f
+                                val s = 1f + 0.04f * lift
+                                scaleX = s
+                                scaleY = s
+                                alpha = if (played && !dragging) 0.5f else 1f
+                                shadowElevation = 28f * lift
+                                shape = RoundedCornerShape(16.dp)
+                                clip = false
+                            }
+                            .background(
+                                if (dragging) p.card else Color.Transparent,
+                                RoundedCornerShape(16.dp)
+                            )
+                            .then(dragMod)
                             .clickable { onPlay(e.index) }
-                            .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)
-                            .graphicsLayer { alpha = if (played) 0.5f else 1f },
+                            .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Cover(e.song, Modifier.size(48.dp), 8.dp, p, 200)
@@ -624,28 +721,22 @@ private fun QueuePanel(
                         if (playing) {
                             GlyphIcon(Glyph.Play, p.accent, Modifier.padding(end = 12.dp).size(14.dp))
                         } else {
-                            if (!shuffle) {
-                                // up / down (only while shuffle is off, because then the order is the playlist order)
+                            // one tap: this song jumps to the top of "up next" and plays right after the current one
+                            if (!shuffle && curPos >= 0 && pos > curPos + 1) {
                                 Box(
-                                    Modifier.size(34.dp).clip(CircleShape)
-                                        .clickable(enabled = pos > 0) { onMove(e.index, queue[pos - 1].index) },
+                                    Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(p.accent.copy(alpha = 0.18f))
+                                        .clickable {
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            onMove(e.index, currentWindow + if (e.index > currentWindow) 1 else 0)
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    GlyphIcon(
-                                        Glyph.ChevronDown, p.secondary.copy(alpha = if (pos > 0) 1f else 0.25f),
-                                        Modifier.size(18.dp).graphicsLayer { rotationZ = 180f }
-                                    )
+                                    Text("Play next", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = p.accent)
                                 }
-                                Box(
-                                    Modifier.size(34.dp).clip(CircleShape)
-                                        .clickable(enabled = pos < queue.lastIndex) { onMove(e.index, queue[pos + 1].index) },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    GlyphIcon(
-                                        Glyph.ChevronDown, p.secondary.copy(alpha = if (pos < queue.lastIndex) 1f else 0.25f),
-                                        Modifier.size(18.dp)
-                                    )
-                                }
+                                Spacer(Modifier.width(4.dp))
                             }
                             Box(
                                 Modifier.size(34.dp).clip(CircleShape).clickable { onRemove(e.index) },

@@ -146,6 +146,8 @@ class Settings(private val prefs: SharedPreferences) {
     var islandWidth by mutableIntStateOf(prefs.getInt("dynamic_island_width", 250).coerceIn(180, 360)); private set
     var islandHeight by mutableIntStateOf(prefs.getInt("dynamic_island_height", 36).coerceIn(30, 64)); private set
     /** 0 = compact, 1 = balanced, 2 = wide notification panel. */
+    /** How far down (dp) the compact Dynamic Island sits from its normal place. */
+    var islandOffsetY by mutableIntStateOf(prefs.getInt("dynamic_island_offset_y", 0).coerceIn(0, 80)); private set
     var noticeSize by mutableIntStateOf(prefs.getInt("notice_island_size", 1).coerceIn(0, 2)); private set
     /** 0 = black, 1 = translucent glass, 2 = accent-tinted. */
     var noticeTint by mutableIntStateOf(prefs.getInt("notice_island_tint", 0).coerceIn(0, 2)); private set
@@ -166,6 +168,7 @@ class Settings(private val prefs: SharedPreferences) {
     fun changeNoticeEnabled(v: Boolean) { noticeEnabled = v; prefs.edit().putBoolean("notice_island_enabled", v).apply() }
     fun changeIslandWidth(v: Int) { islandWidth = v.coerceIn(180, 360); prefs.edit().putInt("dynamic_island_width", islandWidth).apply() }
     fun changeIslandHeight(v: Int) { islandHeight = v.coerceIn(30, 64); prefs.edit().putInt("dynamic_island_height", islandHeight).apply() }
+    fun changeIslandOffsetY(v: Int) { islandOffsetY = v.coerceIn(0, 80); prefs.edit().putInt("dynamic_island_offset_y", islandOffsetY).apply() }
     fun changeNoticeSize(v: Int) { noticeSize = v.coerceIn(0, 2); prefs.edit().putInt("notice_island_size", noticeSize).apply() }
     fun changeNoticeTint(v: Int) { noticeTint = v.coerceIn(0, 2); prefs.edit().putInt("notice_island_tint", noticeTint).apply() }
     fun changeCrossfade(v: Int) { crossfade = v; prefs.edit().putInt("crossfade", v).apply() }

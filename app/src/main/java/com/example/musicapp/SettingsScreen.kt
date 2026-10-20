@@ -137,7 +137,7 @@ fun SettingsTab(
                 Spacer(Modifier.height(10.dp))
                 Text(
                     if (settings.miniStyle == 1)
-                        "A fixed-size Dynamic Island at the top. It shows only the cover; tap it to open playback controls."
+                        "A fixed-size Dynamic Island at the top. It shows only the cover; tap it to open playback controls (the title shows when it is expanded)."
                     else
                         "The classic glass mini player with cover and playback controls.",
                     fontSize = 13.sp, color = p.secondary
@@ -160,7 +160,15 @@ fun SettingsTab(
                         steps = 16,
                         colors = SliderDefaults.colors(thumbColor = p.accent, activeTrackColor = p.accent)
                     )
-                    Text("Adjust the width and height manually. Your choices are saved automatically.", fontSize = 12.sp, color = p.secondary)
+                    Text("Dynamic Island position from the top: +${settings.islandOffsetY} dp", fontSize = 13.sp, color = p.text)
+                    Slider(
+                        value = settings.islandOffsetY.toFloat(),
+                        onValueChange = { settings.changeIslandOffsetY(it.toInt()) },
+                        valueRange = 0f..80f,
+                        steps = 15,
+                        colors = SliderDefaults.colors(thumbColor = p.accent, activeTrackColor = p.accent)
+                    )
+                    Text("Adjust the width, height and position manually. Your choices are saved automatically.", fontSize = 12.sp, color = p.secondary)
                 }
             }
         }

@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -91,6 +92,20 @@ class Palette(
     val selectedPill: Color = if (dark) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.07f)
     val coverTop: Color = if (tinted) tone(0.6f, 0.40f) else if (dark) Color(0xFF3A3A3C) else Color(0xFFE5E5EA)
     val coverBottom: Color = if (tinted) tone(0.7f, 0.28f) else if (dark) Color(0xFF2C2C2E) else Color(0xFFD1D1D6)
+
+    // Mini player card and floating tab bar: both follow the theme, but each one is a little different
+    // from the background and from each other so they stay visible. The card is never white.
+    val miniCard: Color =
+        if (tinted) tone(0.80f, 0.42f)
+        else if (dark) androidx.compose.ui.graphics.lerp(Color(0xFF2E2E33), baseAccent, 0.22f)
+        else androidx.compose.ui.graphics.lerp(Color(0xFFE4E5EC), baseAccent, 0.30f)
+    val tabBarColor: Color =
+        if (tinted) tone(0.85f, 0.24f)
+        else if (dark) Color(0xFF1B1B1F) else Color(0xFFD6D7E0)
+    /** Text and icons that sit on [miniCard]. */
+    val onMiniCard: Color = if (miniCard.luminance() > 0.5f) Color(0xFF16181F) else Color.White
+    /** Icons that sit on [tabBarColor]. */
+    val onTabBar: Color = if (tabBarColor.luminance() > 0.5f) Color(0xFF16181F) else Color.White
 }
 
 /**

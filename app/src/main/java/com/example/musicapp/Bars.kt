@@ -78,7 +78,9 @@ fun MiniPlayer(
     flatDock: Boolean = false
 ) {
     val island = style == 1
-    val shape: Shape = if (island) RoundedCornerShape(50) else RoundedCornerShape(24.dp)
+    // "card" look: white card with the cover on its edge, half hidden behind the dark tab bar
+    val card = !island && !flatDock
+    val shape: Shape = if (island) RoundedCornerShape(50) else if (card) RoundedCornerShape(28.dp) else RoundedCornerShape(24.dp)
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
@@ -192,6 +194,11 @@ fun MiniPlayer(
                     }
                     .border(1.dp, Color.White.copy(alpha = 0.10f), shape)
                     .padding(horizontal = 9.dp, vertical = 9.dp)
+                else if (card) Modifier
+                    .shadow(14.dp, shape, ambientColor = Color.Black.copy(alpha = 0.30f), spotColor = Color.Black.copy(alpha = 0.30f))
+                    .clip(shape)
+                    .background(p.miniCard)
+                    .height(MiniCardHeight)
                 else Modifier
                     .glass(shape, p)
                     .padding(horizontal = 8.dp, vertical = 7.dp)
@@ -200,6 +207,50 @@ fun MiniPlayer(
     ) {
         if (island) {
             IslandContent(song, isPlaying, isFav, p, onToggle, onNext, onFav)
+            return@Row
+        }
+        if (card) {
+            val navy = p.onMiniCard
+            // cover runs to the left edge and down behind the tab bar
+            Box(
+                Modifier.width(88.dp).fillMaxHeight()
+                    .clip(RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp))
+            ) { Cover(song, Modifier.fillMaxSize(), 0.dp, p, 400) }
+            Spacer(Modifier.width(14.dp))
+            // controls live in the part of the card that stays visible above the tab bar
+            Row(
+                Modifier.weight(1f).height(MiniCardHeight - MiniCardHidden).align(Alignment.Top),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontSize = 16.sp, fontWeight = FontWeight.Bold, color = navy
+                    )
+                    Text(
+                        song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontSize = 13.sp, color = navy.copy(alpha = 0.62f)
+                    )
+                }
+                Box(
+                    Modifier.size(40.dp).clip(CircleShape).clickable { onFav() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    GlyphIcon(
+                        if (isFav) Glyph.Heart else Glyph.HeartOutline,
+                        if (isFav) p.accent else navy,
+                        Modifier.size(22.dp)
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
+                Box(
+                    Modifier.size(50.dp).clip(CircleShape).background(navy).clickable { onToggle() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    GlyphIcon(if (isPlaying) Glyph.Pause else Glyph.Play, p.miniCard, Modifier.size(22.dp))
+                }
+                Spacer(Modifier.width(10.dp))
+            }
             return@Row
         }
         Cover(song, Modifier.size(42.dp), 11.dp, p, 300)
@@ -339,7 +390,8 @@ fun GlassTabBar(
     p: Palette,
     photo: ImageBitmap?,
     profileName: String,
-    classic: Boolean = false
+    classic: Boolean = false,
+    navy: Boolean = false   // compact icon-only pill in the theme colour
 ) {
     if (classic) {
         ClassicTabBar(modifier, selected, onSelect, p, photo, profileName)
@@ -352,8 +404,9 @@ fun GlassTabBar(
         "Profile" to Glyph.Artist
     )
     val count = tabs.size
-    val barShape = RoundedCornerShape(32.dp)
-    val lensShape = RoundedCornerShape(28.dp)
+    val barH = if (navy) 56.dp else BarHeight
+    val barShape = RoundedCornerShape(if (navy) 28.dp else 32.dp)
+    val lensShape = RoundedCornerShape(if (navy) 24.dp else 28.dp)
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
     val padPx = with(density) { BarPad.toPx() }
@@ -397,7 +450,7 @@ fun GlassTabBar(
 
     Box(
         modifier
-            .height(BarHeight)
+            .height(barH)
             .onSizeChanged { widthState.intValue = it.width }
             .pointerInput(Unit) {
                 detectTapGestures(
@@ -441,7 +494,7 @@ fun GlassTabBar(
             }
     ) {
         // 1) iOS style floating capsule: soft dark glass, light rim, soft shadow.
-        Box(Modifier.matchParentSize().iosGlass(barShape))
+        Box(Modifier.matchParentSize().iosGlass(barShape, if (navy) p.tabBarColor else null))
 
         // 2) the lens: sits inside the bar, and lifts out of it while held
         if (itemW > 0f) {
@@ -497,7 +550,7 @@ fun GlassTabBar(
         Row(Modifier.fillMaxSize().padding(horizontal = 6.dp)) {
             tabs.forEachIndexed { i, (label, glyph) ->
                 val sel = i == selected
-                val tint by animateColorAsState(if (sel) p.accent else Color(0xFF9A9AA0), tween(200), label = "tint")
+                val tint by animateColorAsState(if (navy) (if (sel) p.onTabBar else p.onTabBar.copy(alpha = 0.50f)) else if (sel) p.accent else Color(0xFF9A9AA0), tween(200), label = "tint")
                 Column(
                     Modifier.weight(1f).fillMaxHeight(),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -528,15 +581,17 @@ fun GlassTabBar(
                                 14.sp
                             )
                         } else {
-                            GlyphIcon(glyph, tint, Modifier.size(22.dp))
+                            GlyphIcon(glyph, tint, Modifier.size(if (navy) 24.dp else 22.dp))
                         }
                     }
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        label, fontSize = 10.sp,
-                        fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium,
-                        color = tint, maxLines = 1
-                    )
+                    if (!navy) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            label, fontSize = 10.sp,
+                            fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium,
+                            color = tint, maxLines = 1
+                        )
+                    }
                 }
             }
         }
@@ -544,11 +599,14 @@ fun GlassTabBar(
 }
 
 /** iOS-like dark glass: translucent fill, light rim on the edge, soft shadow. */
-private fun Modifier.iosGlass(shape: Shape): Modifier =
+private fun Modifier.iosGlass(shape: Shape, solid: Color? = null): Modifier =
     this
         .shadow(14.dp, shape, ambientColor = Color.Black.copy(alpha = 0.4f), spotColor = Color.Black.copy(alpha = 0.4f))
         .clip(shape)
-        .background(Brush.verticalGradient(listOf(Color(0xFF2A2A2D).copy(alpha = 0.94f), Color(0xFF18181A).copy(alpha = 0.94f))))
+        .background(
+            if (solid != null) Brush.verticalGradient(listOf(solid, solid))
+            else Brush.verticalGradient(listOf(Color(0xFF2A2A2D).copy(alpha = 0.94f), Color(0xFF18181A).copy(alpha = 0.94f)))
+        )
         .border(
             1.dp,
             Brush.linearGradient(listOf(Color.White.copy(alpha = 0.30f), Color.White.copy(alpha = 0.05f), Color.White.copy(alpha = 0.16f))),
@@ -593,27 +651,30 @@ private fun ClassicTabBar(
 }
 
 val BarHeight = 64.dp
+/** Total height of the white mini player card, and how much of its bottom the tab bar covers. */
+val MiniCardHeight = 96.dp
+val MiniCardHidden = 34.dp
 private val BarPad = 6.dp
 
 /** Round glass search button that sits next to the tab bar (like the iOS tab bar). */
 @Composable
-fun SearchButton(active: Boolean, p: Palette, onClick: () -> Unit, classic: Boolean = false) {
+fun SearchButton(active: Boolean, p: Palette, onClick: () -> Unit, classic: Boolean = false, navy: Boolean = false) {
     var pressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         if (pressed) 0.88f else 1f,
         spring(dampingRatio = 0.55f, stiffness = 450f),
         label = "searchScale"
     )
-    val tint by animateColorAsState(if (active) p.accent else Color.White, label = "searchTint")
+    val tint by animateColorAsState(if (active) p.accent else if (navy) p.onTabBar else Color.White, label = "searchTint")
     val onClickS by rememberUpdatedState(onClick)
     Box(
         Modifier
-            .size(BarHeight)
+            .size(if (navy) 56.dp else BarHeight)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }
-            .then(if (classic) Modifier.background(Color(0xFF1C1C1E).copy(alpha = 0.96f)) else Modifier.iosGlass(CircleShape))
+            .then(if (classic) Modifier.background(Color(0xFF1C1C1E).copy(alpha = 0.96f)) else Modifier.iosGlass(CircleShape, if (navy) p.tabBarColor else null))
             .background(if (active) p.accent.copy(alpha = 0.22f) else Color.Transparent, if (classic) RoundedCornerShape(0.dp) else CircleShape)
             .pointerInput(Unit) {
                 detectTapGestures(
@@ -663,14 +724,15 @@ fun TopIsland(
     position: Long = 0L,
     reserveTop: Boolean = true,
     onSeek: (Long) -> Unit = {},
-    onOpenPlayer: () -> Unit = {}
+    onOpenPlayer: () -> Unit = {},
+    expanded: Boolean = false,
+    onExpandedChange: (Boolean) -> Unit = {}
 ) {
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
     val statusH = with(density) { WindowInsets.statusBarsIgnoringVisibility.getTop(density).toDp() }
     val pillH = islandHeightDp.dp
     val top = ((statusH - pillH) / 2).coerceAtLeast(4.dp)
-    var expanded by remember { mutableStateOf(false) }
     val pop = remember { Animatable(1f) }
 
     // 0f = compact pill, 1f = expanded panel. One spring drives size, corner, shadow and content.
@@ -722,6 +784,8 @@ fun TopIsland(
                 .graphicsLayer {
                     val s = pop.value * (if (expanded) 1f else press)
                     scaleX = s; scaleY = s
+                    // the big panel drops lower on the screen while it grows
+                    translationY = 56.dp.toPx() * t
                     transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
                 }
                 .width(width)
@@ -742,7 +806,7 @@ fun TopIsland(
                         },
                         onTap = {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            expanded = !expanded
+                            onExpandedChange(!expanded)
                         }
                     )
                 }
@@ -759,12 +823,8 @@ fun TopIsland(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Cover(song, Modifier.size((islandHeightDp - 8).coerceAtLeast(20).dp), 0.dp, p, 200, round = true)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        song.title, Modifier.weight(1f), color = Color.White, fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(Modifier.width(6.dp))
+                    // only the cover and the wave: the title shows when the island is expanded
+                    Spacer(Modifier.weight(1f))
                     IslandWave(isPlaying, wavePhase, Color.White, 0.85f)
                     Spacer(Modifier.width(6.dp))
                 }
@@ -804,7 +864,7 @@ fun TopIsland(
                             Modifier.size(34.dp).clip(CircleShape)
                                 .background(Color.White.copy(alpha = 0.16f))
                                 .clickable {
-                                    expanded = false
+                                    onExpandedChange(false)
                                     onOpenPlayer()
                                 },
                             contentAlignment = Alignment.Center

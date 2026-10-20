@@ -183,6 +183,8 @@ fun MusicApp(
     var showEdit by remember { mutableStateOf(false) }
 
     var showPlayer by remember { mutableStateOf(false) }
+    var islandExpanded by remember { mutableStateOf(false) }
+    LaunchedEffect(showPlayer) { if (showPlayer) islandExpanded = false }
     var artistPage by remember { mutableStateOf<String?>(null) }
     var albumPage by remember { mutableStateOf<List<Song>?>(null) }
     var barsVisible by remember { mutableStateOf(true) }
@@ -218,6 +220,8 @@ fun MusicApp(
     // Scrolling down: only the tab bar (and search button) fades out, and the mini player glides
     // down into the place the tab bar had. The mini player itself never fades.
     val classicTabs = settings.tabBarStyle == 1
+    // white card mini player half hidden behind a dark tab bar
+    val cardStyle = settings.miniStyle == 0 && !classicTabs
     val tabHide by animateFloatAsState(
         if (classicTabs || barsShown) 0f else 1f,
         spring(dampingRatio = 0.85f, stiffness = 380f),
@@ -340,6 +344,8 @@ fun MusicApp(
                 override fun onRepeatModeChanged(mode: Int) { repeatMode = mode }
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     currentWindow = c.currentMediaItemIndex
+                    // new song: the bar starts again from the real position, not from the old song's
+                    position = c.currentPosition
                     current = mediaItem?.mediaId?.toLongOrNull()?.let { id -> byId[id]?.also { profile.recordRecentlyPlayed(id) } }
                 }
             }
@@ -438,12 +444,13 @@ fun MusicApp(
     }
 
     // Progress for the full player's seek bar.
-    LaunchedEffect(controller, showPlayer) {
+    // (also feeds the Dynamic Island, so it runs whenever a controller exists)
+    LaunchedEffect(controller) {
         val c = controller
-        if (c != null && showPlayer) {
+        if (c != null) {
             while (true) {
                 position = c.currentPosition
-                delay(120)
+                delay(if (showPlayer || islandExpanded) 120 else 500)
             }
         }
     }
@@ -639,12 +646,15 @@ fun MusicApp(
             current?.takeIf { settings.miniStyle == 0 }?.let { song ->
                 Box(
                     Modifier
-                        .zIndex(1f) // always above the tab row, so it keeps taking touches
+                        // normally behind the tab bar (card look); above it once the tab bar is hidden
+                        .zIndex(if (cardStyle && miniDock < 0.5f) 0f else 1f)
                         .onSizeChanged { miniH = it.height }
                         .graphicsLayer {
                             // centre of the mini player moves onto the centre of the tab row
                             val toTabs = 8.dp.toPx() + (miniH + tabRowH) / 2f
-                            translationY = miniDock * toTabs + imeHide * (size.height + 200.dp.toPx())
+                            // card look: sink the card so the tab bar covers its bottom part
+                            val sink = if (cardStyle) (MiniCardHidden + 8.dp).toPx() * (1f - miniDock) else 0f
+                            translationY = miniDock * toTabs + sink + imeHide * (size.height + 200.dp.toPx())
                             alpha = 1f
                         }
                 ) {
@@ -697,11 +707,12 @@ fun MusicApp(
                             }
                         }
                     },
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = if (cardStyle) Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally) else Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 GlassTabBar(
-                    modifier = Modifier.weight(1f),
+                    // card look: a compact pill, not stretched over the whole width
+                    modifier = if (cardStyle) Modifier.weight(1f, fill = false).widthIn(max = 280.dp) else Modifier.weight(1f),
                     selected = if (searching) -1 else tab,
                     onSelect = {
                         searching = false
@@ -713,7 +724,8 @@ fun MusicApp(
                     p = p,
                     photo = profile.photo,
                     profileName = profile.name,
-                    classic = classicTabs
+                    classic = classicTabs,
+                    navy = cardStyle
                 )
                 SearchButton(
                     active = searching,
@@ -722,9 +734,18 @@ fun MusicApp(
                         barsVisible = true
                         searching = true
                     },
-                    classic = classicTabs
+                    classic = classicTabs,
+                    navy = cardStyle
                 )
             }
+        }
+
+        // Touch anywhere outside the expanded Dynamic Island: it shrinks back.
+        if (islandExpanded && settings.miniStyle == 1 && !showPlayer && current != null) {
+            Box(
+                Modifier.fillMaxSize().zIndex(1.5f)
+                    .pointerInput(Unit) { detectTapGestures { islandExpanded = false } }
+            )
         }
 
         // Notification island on top; the music Dynamic Island is pushed down below it.
@@ -734,7 +755,7 @@ fun MusicApp(
 
         val islandDensity = LocalDensity.current
         val islandStatusH = with(islandDensity) { WindowInsets.statusBarsIgnoringVisibility.getTop(islandDensity).toDp() }
-        val islandTop = ((islandStatusH - settings.islandHeight.dp) / 2).coerceAtLeast(4.dp)
+        val islandTop = ((islandStatusH - settings.islandHeight.dp) / 2).coerceAtLeast(4.dp) + settings.islandOffsetY.dp
         Column(
             Modifier.align(Alignment.TopCenter).zIndex(2f).fillMaxWidth().padding(top = islandTop),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -783,7 +804,9 @@ fun MusicApp(
                                 controller?.seekTo(ms)
                                 position = ms
                             },
-                            onOpenPlayer = { showPlayer = true }
+                            onOpenPlayer = { showPlayer = true },
+                            expanded = islandExpanded,
+                            onExpandedChange = { islandExpanded = it }
                         )
                     }
                 }
