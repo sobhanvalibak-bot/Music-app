@@ -131,7 +131,7 @@ fun SettingsTab(
         }
         item {
             SettingsCard("Player style", p) {
-                Segmented(listOf("Classic", "Dynamic Island"), settings.miniStyle, p) { settings.changeMiniStyle(it) }
+                Segmented(listOf("Classic", "Dynamic Island"), settings.miniStyle, p) { settings.changeMiniStyle(it); NoticeBus.showTest("Player style changed to ${if (it == 1) "Dynamic Island" else "Classic"}.") }
                 Spacer(Modifier.height(10.dp))
                 Text(
                     if (settings.miniStyle == 1)
@@ -149,18 +149,22 @@ fun SettingsTab(
                         Text("Show notifications", color = p.text, fontWeight = FontWeight.Medium)
                         Text("Show a cover preview when a notification arrives", color = p.secondary, fontSize = 12.sp)
                     }
-                    Switch(checked = settings.noticeEnabled, onCheckedChange = settings::changeNoticeEnabled)
+                    Switch(checked = settings.noticeEnabled, onCheckedChange = { settings.changeNoticeEnabled(it); NoticeBus.showTest(if (it) "Notification previews enabled." else "Notification previews disabled.") })
                 }
                 Spacer(Modifier.height(12.dp))
                 Text("Panel size", color = p.text, fontSize = 13.sp)
                 Spacer(Modifier.height(6.dp))
-                Segmented(listOf("Compact", "Balanced", "Wide"), settings.noticeSize, p) { settings.changeNoticeSize(it) }
+                Segmented(listOf("Compact", "Balanced", "Wide"), settings.noticeSize, p) { settings.changeNoticeSize(it); NoticeBus.showTest("Notification panel size changed to ${listOf("Compact", "Balanced", "Wide")[it]}.") }
                 Spacer(Modifier.height(12.dp))
                 Text("Panel appearance", color = p.text, fontSize = 13.sp)
                 Spacer(Modifier.height(6.dp))
-                Segmented(listOf("Black", "Glass", "Accent"), settings.noticeTint, p) { settings.changeNoticeTint(it) }
+                Segmented(listOf("Black", "Glass", "Accent"), settings.noticeTint, p) { settings.changeNoticeTint(it); NoticeBus.showTest("Notification appearance changed to ${listOf("Black", "Glass", "Accent")[it]}.") }
                 Spacer(Modifier.height(8.dp))
-                Text("Each notification stays for 5 seconds. Tap its cover to read the description; the title is hidden.", fontSize = 12.sp, color = p.secondary)
+                Text("Each notification stays for 5 seconds. Tap its cover to read the description; the title is hidden. A test preview appears whenever you change these settings.", fontSize = 12.sp, color = p.secondary)
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = { NoticeBus.showTest("This is a test notification from Music. Your current panel settings are applied.") }) {
+                    Text("Send test notification", color = p.accent)
+                }
             }
         }
         item {

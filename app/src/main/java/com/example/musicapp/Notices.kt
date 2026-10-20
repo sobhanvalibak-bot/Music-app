@@ -59,8 +59,23 @@ class Notice(
 /** The service writes here, the UI reads from here (same process). */
 object NoticeBus {
     var current by mutableStateOf<Notice?>(null)
+        private set
+    private var testCounter = 0
 
+    fun publish(notice: Notice) { current = notice }
     fun dismiss() { current = null }
+
+    /** Show an in-app preview after a notification setting is changed. */
+    fun showTest(description: String) {
+        testCounter++
+        current = Notice(
+            key = "settings-test-$testCounter",
+            appName = "Music · Notification test",
+            icon = null,
+            title = "Notification test",
+            text = description
+        )
+    }
 }
 
 /** Needs "Notification access" (Settings). Android does not allow a runtime dialog for it. */
@@ -101,12 +116,12 @@ class NoticeListenerService : NotificationListenerService() {
             try { pm.getApplicationIcon(sbn.packageName).toImageBitmap(96) } catch (_: Exception) { null }
         }
         val notice = Notice(sbn.key, appName, icon, title, text)
-        main.post { NoticeBus.current = notice }
+        main.post { NoticeBus.publish(notice) }
     }
 
-    override fun onNotificationRemoved(sbn: StatusBarNotification) {
-        main.post { if (NoticeBus.current?.key == sbn.key) NoticeBus.current = null }
-    }
+    // Do not dismiss the preview when Android removes/replaces the source notification.
+    // The island owns its five-second timeout; many apps immediately update their notifications.
+    override fun onNotificationRemoved(sbn: StatusBarNotification) = Unit
 }
 
 private fun Bitmap.toImageBitmap(size: Int): ImageBitmap {
