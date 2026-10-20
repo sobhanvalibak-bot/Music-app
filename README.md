@@ -101,3 +101,16 @@ Kotlin 2.0, Jetpack Compose (Material 3), AndroidX Media3 (ExoPlayer and Session
 - Smoothed cover-derived theme color transitions to 1.1 seconds with FastOutSlowIn easing.
 
 Build verification: this archive does not include Gradle Wrapper scripts and the current environment has no `gradle` executable, so an Android compile could not be run here. Please run `assembleDebug` in GitHub Actions to validate the full Android toolchain. Existing notification currently relies on Media3's standard media-session controls; custom Shuffle/Repeat/Like notification buttons are not yet implemented in this pass.
+
+
+## Playback extras (inspired by BitChord, local files only)
+
+- **Crossfade** (Settings > Playback, or the Playback sheet in the full player): 0–12 s. While the next song fades in, a short helper player finishes the old one and fades it out. With crossfade off, ExoPlayer's normal gapless playback is used.
+- **Playback speed** 0.5×–2× (Playback sheet). The chosen speed is remembered.
+- **Sleep timer**: 15/30/45/60 min or "End of song".
+- **Skip silence**: jumps over silent parts inside a song.
+- **Equalizer**: opens the system equalizer on this app's audio session.
+- **Stats for nerds**: format, sample rate, bit depth (Android 12+), channels, bitrate.
+- **Lyrics** (full player > Lyrics): shows a saved `.lrc` for the song, lyrics found inside the audio file, or a `.lrc` you import. Line timing follows the song and tapping a line seeks; enhanced `.lrc` with `<mm:ss.xx>` word times highlights word by word. Lyrics found with *Edit info > Find lyrics* are now also saved on the device so they work offline afterwards.
+
+New files: `Extras.kt` (sleep timer state, LRC parser, lyrics store, audio info), `PlayerExtras.kt` (lyrics panel and Playback sheet). `PlaybackService.kt` was rewritten to host crossfade, sleep timer and the equalizer session.
