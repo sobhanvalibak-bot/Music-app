@@ -15,6 +15,7 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -31,6 +32,26 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
+
+// ───────────────────────── Queue model ─────────────────────────
+
+/** One row of the playback queue. [index] is the position in the player's playlist. */
+data class QueueEntry(val index: Int, val song: Song)
+
+/** The queue in the order it will actually be played (follows shuffle). */
+fun buildQueue(c: Player, byId: Map<Long, Song>): List<QueueEntry> {
+    val t = c.currentTimeline
+    if (t.isEmpty) return emptyList()
+    val shuffled = c.shuffleModeEnabled
+    val out = ArrayList<QueueEntry>()
+    var i = t.getFirstWindowIndex(shuffled)
+    while (i != androidx.media3.common.C.INDEX_UNSET && out.size < t.windowCount) {
+        val song = c.getMediaItemAt(i).mediaId.toLongOrNull()?.let { byId[it] }
+        if (song != null) out.add(QueueEntry(i, song))
+        i = t.getNextWindowIndex(i, Player.REPEAT_MODE_OFF, shuffled)
+    }
+    return out
+}
 
 // ───────────────────────── Full player ─────────────────────────
 
@@ -60,13 +81,21 @@ fun FullPlayer(
     settings: Settings,
     speed: Float,
     onSpeed: (Float) -> Unit,
-    audioInfo: AudioInfo?
+    audioInfo: AudioInfo?,
+    queue: List<QueueEntry>,
+    currentWindow: Int,
+    onPlayQueueItem: (Int) -> Unit,
+    onRemoveQueueItem: (Int) -> Unit,
+    onMoveQueueItem: (Int, Int) -> Unit,
+    onClearUpcoming: () -> Unit
 ) {
+    var showQueue by remember { mutableStateOf(false) }
     var showAlbum by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
     var showOptions by remember { mutableStateOf(false) }
     // swiping down must not close the player while one of the panels is open
-    val showAlbumNow by rememberUpdatedState(showAlbum || showLyrics || showOptions)
+    val showAlbumNow by rememberUpdatedState(showAlbum || showLyrics || showOptions || showQueue)
+    BackHandler(enabled = showQueue) { showQueue = false }
     BackHandler(enabled = showAlbum) { showAlbum = false }
     BackHandler(enabled = showLyrics) { showLyrics = false }
     BackHandler(enabled = showOptions) { showOptions = false }
@@ -280,7 +309,7 @@ fun FullPlayer(
                         .clip(RoundedCornerShape(50))
                         .background(p.selectedPill)
                         .clickable { showLyrics = true }
-                        .padding(horizontal = 18.dp, vertical = 9.dp),
+                        .padding(horizontal = 14.dp, vertical = 9.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     GlyphIcon(Glyph.Note, p.text, Modifier.size(16.dp))
@@ -291,14 +320,26 @@ fun FullPlayer(
                     Modifier
                         .clip(RoundedCornerShape(50))
                         .background(p.selectedPill)
+                        .clickable { showQueue = true }
+                        .padding(horizontal = 14.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    GlyphIcon(Glyph.Queue, p.text, Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Queue", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = p.text)
+                }
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(p.selectedPill)
                         .clickable { showOptions = true }
-                        .padding(horizontal = 18.dp, vertical = 9.dp),
+                        .padding(horizontal = 14.dp, vertical = 9.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     GlyphIcon(Glyph.Tune, p.text, Modifier.size(16.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        if (kotlin.math.abs(speed - 1f) < 0.01f) "Playback" else "Playback · ${speed}×",
+                        if (kotlin.math.abs(speed - 1f) < 0.01f) "Playback" else "${speed}×",
                         fontSize = 14.sp, fontWeight = FontWeight.Medium, color = p.text
                     )
                 }
@@ -319,6 +360,24 @@ fun FullPlayer(
                 p = p,
                 onClose = { showAlbum = false },
                 onPlay = onPlayAlbumSong
+            )
+        }
+
+        AnimatedVisibility(
+            visible = showQueue,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+        ) {
+            QueuePanel(
+                queue = queue,
+                currentWindow = currentWindow,
+                shuffle = shuffle,
+                p = p,
+                onClose = { showQueue = false },
+                onPlay = onPlayQueueItem,
+                onRemove = onRemoveQueueItem,
+                onMove = onMoveQueueItem,
+                onClearUpcoming = onClearUpcoming
             )
         }
 
@@ -350,6 +409,130 @@ fun FullPlayer(
                 info = audioInfo,
                 onClose = { showOptions = false }
             )
+        }
+    }
+}
+
+@Composable
+private fun QueuePanel(
+    queue: List<QueueEntry>,
+    currentWindow: Int,
+    shuffle: Boolean,
+    p: Palette,
+    onClose: () -> Unit,
+    onPlay: (Int) -> Unit,
+    onRemove: (Int) -> Unit,
+    onMove: (Int, Int) -> Unit,
+    onClearUpcoming: () -> Unit
+) {
+    val curPos = queue.indexOfFirst { it.index == currentWindow }
+    val upcoming = if (curPos >= 0) queue.size - curPos - 1 else 0
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = if (curPos > 0) curPos - 1 else 0
+    )
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(p.bgBrush)
+            .pointerInput(Unit) { detectTapGestures { } }
+            .statusBarsPadding()
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 20.dp, top = 10.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier.size(44.dp).clip(CircleShape).clickable { onClose() },
+                contentAlignment = Alignment.Center
+            ) { GlyphIcon(Glyph.ChevronDown, p.text, Modifier.size(24.dp)) }
+            Spacer(Modifier.width(6.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Queue", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = p.text)
+                Text(
+                    if (shuffle) "${queue.size} songs · Shuffle on" else "${queue.size} songs",
+                    fontSize = 12.sp, color = p.secondary
+                )
+            }
+            if (upcoming > 0) {
+                Text(
+                    "Clear up next", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = p.accent,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable { onClearUpcoming() }
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                )
+            }
+        }
+        if (queue.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("The queue is empty", fontSize = 15.sp, color = p.secondary)
+            }
+        } else {
+            LazyColumn(
+                Modifier.weight(1f),
+                state = listState,
+                contentPadding = PaddingValues(
+                    bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 16.dp
+                )
+            ) {
+                itemsIndexed(queue, key = { _, e -> "${e.index}-${e.song.id}" }) { pos, e ->
+                    val playing = e.index == currentWindow
+                    val played = curPos >= 0 && pos < curPos
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onPlay(e.index) }
+                            .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)
+                            .graphicsLayer { alpha = if (played) 0.5f else 1f },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Cover(e.song, Modifier.size(48.dp), 8.dp, p, 200)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                e.song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                                color = if (playing) p.accent else p.text
+                            )
+                            Text(
+                                e.song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                fontSize = 13.sp, color = p.secondary
+                            )
+                        }
+                        if (playing) {
+                            GlyphIcon(Glyph.Play, p.accent, Modifier.padding(end = 12.dp).size(14.dp))
+                        } else {
+                            if (!shuffle) {
+                                // up / down (only while shuffle is off, because then the order is the playlist order)
+                                Box(
+                                    Modifier.size(34.dp).clip(CircleShape)
+                                        .clickable(enabled = pos > 0) { onMove(e.index, queue[pos - 1].index) },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    GlyphIcon(
+                                        Glyph.ChevronDown, p.secondary.copy(alpha = if (pos > 0) 1f else 0.25f),
+                                        Modifier.size(18.dp).graphicsLayer { rotationZ = 180f }
+                                    )
+                                }
+                                Box(
+                                    Modifier.size(34.dp).clip(CircleShape)
+                                        .clickable(enabled = pos < queue.lastIndex) { onMove(e.index, queue[pos + 1].index) },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    GlyphIcon(
+                                        Glyph.ChevronDown, p.secondary.copy(alpha = if (pos < queue.lastIndex) 1f else 0.25f),
+                                        Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                            Box(
+                                Modifier.size(34.dp).clip(CircleShape).clickable { onRemove(e.index) },
+                                contentAlignment = Alignment.Center
+                            ) { GlyphIcon(Glyph.Close, p.secondary, Modifier.size(16.dp)) }
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -26,6 +26,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -112,10 +114,18 @@ fun SongRow(
     onPlayNext: (() -> Unit)? = null,
     onEditInfo: (() -> Unit)? = null
 ) {
+    var sheetOpen by remember(song.id) { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
     Row(
         Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLong)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    sheetOpen = true
+                }
+            )
             .padding(start = 20.dp, end = 8.dp, top = 7.dp, bottom = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -136,26 +146,21 @@ fun SongRow(
             Spacer(Modifier.width(8.dp))
             Text(formatTime(song.durationMs), fontSize = 13.sp, color = p.secondary)
         }
-        var menuOpen by remember(song.id) { mutableStateOf(false) }
         Box {
-            IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
+            IconButton(onClick = { sheetOpen = true }, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Default.MoreVert, contentDescription = "Song options", tint = p.secondary)
             }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                DropdownMenuItem(
-                    text = { Text("Play next") },
-                    onClick = { menuOpen = false; onPlayNext?.invoke() },
-                    enabled = onPlayNext != null
-                )
-                DropdownMenuItem(
-                    text = { Text("Add to playlist") },
-                    onClick = { menuOpen = false; onLong?.invoke() },
-                    enabled = onLong != null
-                )
-                DropdownMenuItem(
-                    text = { Text("Edit song info") },
-                    onClick = { menuOpen = false; onEditInfo?.invoke() },
-                    enabled = onEditInfo != null
+            if (sheetOpen) {
+                SongActionSheet(
+                    song = song,
+                    fav = fav,
+                    p = p,
+                    onDismiss = { sheetOpen = false },
+                    onFav = onFav,
+                    onPlayNext = onPlayNext,
+                    onAddToPlaylist = onLong,
+                    onEditInfo = onEditInfo,
+                    onRemove = onRemove
                 )
             }
         }

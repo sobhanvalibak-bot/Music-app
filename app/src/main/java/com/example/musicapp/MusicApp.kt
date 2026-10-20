@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.Tracks
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -252,6 +253,8 @@ fun MusicApp(
     var position by remember { mutableLongStateOf(0L) }
     var pendingOpen by remember { mutableStateOf(false) }
     var audioInfo by remember { mutableStateOf<AudioInfo?>(null) }
+    var queue by remember { mutableStateOf<List<QueueEntry>>(emptyList()) }
+    var currentWindow by remember { mutableIntStateOf(-1) }
 
     DisposableEffect(Unit) {
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
@@ -279,12 +282,22 @@ fun MusicApp(
             repeatMode = c.repeatMode
             current = c.currentMediaItem?.mediaId?.toLongOrNull()?.let { byId[it] }
             audioInfo = audioInfoFrom(c.currentTracks)
+            queue = buildQueue(c, byId)
+            currentWindow = c.currentMediaItemIndex
             val listener = object : Player.Listener {
                 override fun onTracksChanged(tracks: Tracks) { audioInfo = audioInfoFrom(tracks) }
                 override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
-                override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) { shuffle = shuffleModeEnabled }
+                override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                    shuffle = shuffleModeEnabled
+                    queue = buildQueue(c, byId)
+                }
+                override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                    queue = buildQueue(c, byId)
+                    currentWindow = c.currentMediaItemIndex
+                }
                 override fun onRepeatModeChanged(mode: Int) { repeatMode = mode }
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    currentWindow = c.currentMediaItemIndex
                     current = mediaItem?.mediaId?.toLongOrNull()?.let { id -> byId[id]?.also { profile.recordRecentlyPlayed(id) } }
                 }
             }
@@ -713,7 +726,30 @@ fun MusicApp(
                         settings.changeSpeed(v)
                         controller?.setPlaybackSpeed(v)
                     },
-                    audioInfo = audioInfo
+                    audioInfo = audioInfo,
+                    queue = queue,
+                    currentWindow = currentWindow,
+                    onPlayQueueItem = { w ->
+                        controller?.let {
+                            it.seekTo(w, 0L)
+                            it.prepare()
+                            it.play()
+                        }
+                    },
+                    onRemoveQueueItem = { w ->
+                        controller?.let { if (w != it.currentMediaItemIndex) it.removeMediaItem(w) }
+                    },
+                    onMoveQueueItem = { from, to -> controller?.moveMediaItem(from, to) },
+                    onClearUpcoming = {
+                        controller?.let { c ->
+                            val order = buildQueue(c, byId)
+                            val pos = order.indexOfFirst { it.index == c.currentMediaItemIndex }
+                            if (pos >= 0) {
+                                order.drop(pos + 1).map { it.index }.sortedDescending()
+                                    .forEach { c.removeMediaItem(it) }
+                            }
+                        }
+                    }
                 )
             }
         }

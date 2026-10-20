@@ -252,7 +252,7 @@ fun Cover(
 
 // ───────────────────────── Icons (drawn, no extra deps) ─────────────────────────
 
-enum class Glyph { Note, Album, Artist, Tune, Play, Pause, Next, Heart, HeartOutline, Back, Close, Plus, Prev, Shuffle, Repeat, ChevronDown, Edit, Search }
+enum class Glyph { Note, Album, Artist, Tune, Play, Pause, Next, Heart, HeartOutline, Back, Close, Plus, Prev, Shuffle, Repeat, ChevronDown, Edit, Search, Queue }
 
 @Composable
 fun GlyphIcon(glyph: Glyph, color: Color, modifier: Modifier = Modifier) {
@@ -398,6 +398,19 @@ fun GlyphIcon(glyph: Glyph, color: Color, modifier: Modifier = Modifier) {
                 val sw = w * 0.10f
                 drawCircle(color, radius = w * 0.28f, center = Offset(w * 0.44f, h * 0.44f), style = Stroke(sw))
                 drawLine(color, Offset(w * 0.65f, h * 0.65f), Offset(w * 0.88f, h * 0.88f), sw, StrokeCap.Round)
+            }
+            Glyph.Queue -> {
+                val sw = w * 0.09f
+                drawLine(color, Offset(w * 0.12f, h * 0.24f), Offset(w * 0.88f, h * 0.24f), sw, StrokeCap.Round)
+                drawLine(color, Offset(w * 0.12f, h * 0.50f), Offset(w * 0.88f, h * 0.50f), sw, StrokeCap.Round)
+                drawLine(color, Offset(w * 0.12f, h * 0.76f), Offset(w * 0.46f, h * 0.76f), sw, StrokeCap.Round)
+                val tri = Path().apply {
+                    moveTo(w * 0.62f, h * 0.62f)
+                    lineTo(w * 0.62f, h * 0.90f)
+                    lineTo(w * 0.90f, h * 0.76f)
+                    close()
+                }
+                drawPath(tri, color)
             }
             Glyph.Next -> {
                 val path = Path().apply {
