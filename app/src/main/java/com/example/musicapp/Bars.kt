@@ -2,6 +2,7 @@ package com.example.musicapp
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.infiniteRepeatable
@@ -437,8 +438,8 @@ fun GlassTabBar(
                 )
             }
     ) {
-        // 1) Solid, minimal black capsule inspired by the reference design.
-        Box(Modifier.matchParentSize().clip(barShape).background(Color(0xFF101116)))
+        // 1) iOS style floating capsule: soft dark glass, light rim, soft shadow.
+        Box(Modifier.matchParentSize().iosGlass(barShape))
 
         // 2) the lens: sits inside the bar, and lifts out of it while held
         if (itemW > 0f) {
@@ -483,18 +484,18 @@ fun GlassTabBar(
                         }
                         .clip(lensShape)
                         .background(
-                            if (selected >= 0) Color.White.copy(alpha = 0.10f + 0.06f * lift)
+                            if (selected >= 0) Color.White.copy(alpha = 0.13f + 0.07f * lift)
                             else Color.Transparent
                         )
                 )
             }
         }
 
-        // 3) Minimal icon-only navigation, matching the supplied reference.
-        Row(Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
+        // 3) iOS tab items: icon on top, small label below, selected one tinted.
+        Row(Modifier.fillMaxSize().padding(horizontal = 6.dp)) {
             tabs.forEachIndexed { i, (label, glyph) ->
                 val sel = i == selected
-                val tint by animateColorAsState(if (sel) p.accent else p.secondary, label = "tint")
+                val tint by animateColorAsState(if (sel) p.accent else Color(0xFF9A9AA0), tween(200), label = "tint")
                 Column(
                     Modifier.weight(1f).fillMaxHeight(),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -502,38 +503,55 @@ fun GlassTabBar(
                 ) {
                     Box(
                         Modifier
-                            .size(28.dp)
+                            .size(26.dp)
                             .graphicsLayer {
                                 // dock-style magnification: the closer to the lens, the bigger
                                 val centre = i * itemW
                                 val d = if (itemW > 0f) abs(centre - lensX) / itemW else 1f
                                 val near = (1f - d).coerceIn(0f, 1f) * lensAlpha
-                                val sc = 1f + (0.08f + 0.20f * lift) * near
+                                val sc = 1f + (0.05f + 0.20f * lift) * near
                                 scaleX = sc
                                 scaleY = sc
-                                translationY = -4.dp.toPx() * near * lift
+                                translationY = -3.dp.toPx() * near * lift
                             },
                         contentAlignment = Alignment.Center
                     ) {
                         if (i == 4) {
-                            // Profile tab: the user's own photo, bigger than the other icons
+                            // Profile tab: the user's own photo
                             Avatar(
                                 photo, profileName, p,
                                 Modifier
                                     .fillMaxSize()
-                                    .then(if (sel) Modifier.border(2.dp, p.accent, CircleShape) else Modifier),
+                                    .then(if (sel) Modifier.border(1.5.dp, p.accent, CircleShape) else Modifier),
                                 14.sp
                             )
                         } else {
-                            GlyphIcon(glyph, tint, Modifier.size(24.dp))
+                            GlyphIcon(glyph, tint, Modifier.size(22.dp))
                         }
                     }
-                    // Labels are intentionally hidden in the compact floating dock.
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        label, fontSize = 10.sp,
+                        fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium,
+                        color = tint, maxLines = 1
+                    )
                 }
             }
         }
     }
 }
+
+/** iOS-like dark glass: translucent fill, light rim on the edge, soft shadow. */
+private fun Modifier.iosGlass(shape: Shape): Modifier =
+    this
+        .shadow(14.dp, shape, ambientColor = Color.Black.copy(alpha = 0.4f), spotColor = Color.Black.copy(alpha = 0.4f))
+        .clip(shape)
+        .background(Brush.verticalGradient(listOf(Color(0xFF2A2A2D).copy(alpha = 0.94f), Color(0xFF18181A).copy(alpha = 0.94f))))
+        .border(
+            1.dp,
+            Brush.linearGradient(listOf(Color.White.copy(alpha = 0.30f), Color.White.copy(alpha = 0.05f), Color.White.copy(alpha = 0.16f))),
+            shape
+        )
 
 @Composable
 private fun ClassicTabBar(
@@ -546,15 +564,16 @@ private fun ClassicTabBar(
 ) {
     val tabs = listOf("Songs" to Glyph.Note, "Albums" to Glyph.Album, "Artists" to Glyph.Artist, "Reels" to Glyph.Album, "Profile" to Glyph.Artist)
     Row(
-        modifier.height(BarHeight).background(Color(0xFF101116)),
+        modifier.height(BarHeight)
+            .background(Color(0xFF1C1C1E).copy(alpha = 0.96f))
+            .drawBehind { drawLine(Color.White.copy(alpha = 0.14f), androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(size.width, 0f), 1.dp.toPx()) },
         verticalAlignment = Alignment.CenterVertically
     ) {
         tabs.forEachIndexed { i, (label, glyph) ->
             val chosen = selected == i
             Column(
                 Modifier.weight(1f).fillMaxHeight()
-                    .background(if (chosen) p.selectedPill else Color.Transparent)
-                    .clickable { onSelect(i) }
+                    .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { onSelect(i) }
                     .padding(vertical = 7.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
@@ -562,10 +581,10 @@ private fun ClassicTabBar(
                 if (i == 4) {
                     Avatar(photo, profileName, p, Modifier.size(25.dp).then(if (chosen) Modifier.border(1.5.dp, p.accent, CircleShape) else Modifier), 14.sp)
                 } else {
-                    GlyphIcon(glyph, if (chosen) p.accent else p.secondary, Modifier.size(23.dp))
+                    GlyphIcon(glyph, if (chosen) p.accent else Color(0xFF9A9AA0), Modifier.size(23.dp))
                 }
                 Spacer(Modifier.height(3.dp))
-                Text(label, fontSize = 10.sp, fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Medium, color = if (chosen) p.accent else p.secondary, maxLines = 1)
+                Text(label, fontSize = 10.sp, fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Medium, color = if (chosen) p.accent else Color(0xFF9A9AA0), maxLines = 1)
             }
         }
     }
@@ -583,7 +602,7 @@ fun SearchButton(active: Boolean, p: Palette, onClick: () -> Unit, classic: Bool
         spring(dampingRatio = 0.55f, stiffness = 450f),
         label = "searchScale"
     )
-    val tint by animateColorAsState(if (active) p.accent else p.text, label = "searchTint")
+    val tint by animateColorAsState(if (active) p.accent else Color.White, label = "searchTint")
     val onClickS by rememberUpdatedState(onClick)
     Box(
         Modifier
@@ -592,7 +611,7 @@ fun SearchButton(active: Boolean, p: Palette, onClick: () -> Unit, classic: Bool
                 scaleX = scale
                 scaleY = scale
             }
-            .then(if (classic) Modifier.background(p.card) else Modifier.glass(CircleShape, p))
+            .then(if (classic) Modifier.background(Color(0xFF1C1C1E).copy(alpha = 0.96f)) else Modifier.iosGlass(CircleShape))
             .background(if (active) p.accent.copy(alpha = 0.22f) else Color.Transparent, if (classic) RoundedCornerShape(0.dp) else CircleShape)
             .pointerInput(Unit) {
                 detectTapGestures(
@@ -616,7 +635,12 @@ fun formatTime(ms: Long): String {
 }
 
 
-/** Animated, cover-tinted Dynamic Island inspired by the PHP player's island. */
+/**
+ * Dynamic Island: pure black pill (like the real iPhone one).
+ *  - Tap the pill: it grows with a springy, staggered animation into a control panel.
+ *  - The expanded panel shows cover, title, a live progress bar and round, press-reactive buttons.
+ *  - Content fades/slides in after the shape has started growing, and fades out before it shrinks.
+ */
 @Composable
 fun TopIsland(
     song: Song,
@@ -632,93 +656,188 @@ fun TopIsland(
     onShuffle: () -> Unit,
     onRepeat: () -> Unit,
     modifier: Modifier = Modifier,
-    islandWidthDp: Int = 184,
-    islandHeightDp: Int = 38
+    islandWidthDp: Int = 250,
+    islandHeightDp: Int = 36,
+    position: Long = 0L,
+    reserveTop: Boolean = true
 ) {
     val density = LocalDensity.current
-    val statusH = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
+    val haptic = LocalHapticFeedback.current
+    val statusH = with(density) { WindowInsets.statusBarsIgnoringVisibility.getTop(density).toDp() }
     val pillH = islandHeightDp.dp
     val top = ((statusH - pillH) / 2).coerceAtLeast(4.dp)
     var expanded by remember { mutableStateOf(false) }
     val pop = remember { Animatable(1f) }
-    val width by androidx.compose.animation.core.animateDpAsState(
-        targetValue = if (expanded) 326.dp else islandWidthDp.dp,
-        animationSpec = spring(dampingRatio = 0.68f, stiffness = 360f), label = "islandWidth"
+
+    // 0f = compact pill, 1f = expanded panel. One spring drives size, corner, shadow and content.
+    val t by animateFloatAsState(
+        targetValue = if (expanded) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.62f, stiffness = 300f),
+        label = "islandT"
     )
-    val height by androidx.compose.animation.core.animateDpAsState(
-        targetValue = if (expanded) 126.dp else pillH,
-        animationSpec = spring(dampingRatio = 0.72f, stiffness = 340f), label = "islandHeight"
+    val width = androidx.compose.ui.unit.lerp(islandWidthDp.dp, 340.dp, t)
+    val height = androidx.compose.ui.unit.lerp(pillH, 168.dp, t)
+    val corner = androidx.compose.ui.unit.lerp(pillH / 2, 34.dp, t.coerceIn(0f, 1f))
+    val shape = RoundedCornerShape(corner)
+
+    // the content of the panel appears a bit after the shape starts to grow
+    val contentAlpha by animateFloatAsState(
+        targetValue = if (expanded) 1f else 0f,
+        animationSpec = if (expanded) tween(260, delayMillis = 110, easing = FastOutSlowInEasing) else tween(90),
+        label = "islandContentAlpha"
     )
-    val corner = if (expanded) 28.dp else 50.dp
+    val compactAlpha by animateFloatAsState(
+        targetValue = if (expanded) 0f else 1f,
+        animationSpec = if (expanded) tween(90) else tween(220, delayMillis = 140),
+        label = "islandCompactAlpha"
+    )
+
     LaunchedEffect(song.id) {
-        pop.snapTo(1.045f)
-        pop.animateTo(1f, spring(dampingRatio = 0.48f, stiffness = 380f))
+        pop.snapTo(1.05f)
+        pop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 380f))
     }
-    val wave = androidx.compose.animation.core.rememberInfiniteTransition(label = "islandWave")
+
+    val wave = rememberInfiniteTransition(label = "islandWave")
     val wavePhase by wave.animateFloat(
-        initialValue = 0.65f, targetValue = 1.15f,
-        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-            animation = tween(650, easing = LinearEasing), repeatMode = RepeatMode.Reverse
-        ), label = "wavePhase"
+        initialValue = 0.55f, targetValue = 1.15f,
+        animationSpec = infiniteRepeatable(tween(620, easing = LinearEasing), RepeatMode.Reverse),
+        label = "wavePhase"
     )
-    Box(modifier.fillMaxWidth().padding(top = top), contentAlignment = Alignment.TopCenter) {
-        Column(
+
+    // press feedback on the whole pill
+    var pressed by remember { mutableStateOf(false) }
+    val press by animateFloatAsState(
+        if (pressed) 0.96f else 1f,
+        spring(dampingRatio = 0.55f, stiffness = 500f),
+        label = "islandPress"
+    )
+
+    Box(modifier.fillMaxWidth().padding(top = if (reserveTop) top else 0.dp), contentAlignment = Alignment.TopCenter) {
+        Box(
             Modifier
-                .graphicsLayer { scaleX = pop.value; scaleY = pop.value }
+                .graphicsLayer {
+                    val s = pop.value * (if (expanded) 1f else press)
+                    scaleX = s; scaleY = s
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
+                }
                 .width(width)
                 .height(height)
-                .shadow(if (expanded) 24.dp else 12.dp, RoundedCornerShape(corner), ambientColor = p.accent.copy(alpha = .3f), spotColor = p.accent.copy(alpha = .25f))
-                .clip(RoundedCornerShape(corner))
-                // Keep the island genuinely dark; the cover/accent colours appear as soft,
-                // blurred-looking neon gradients rather than filling the whole capsule.
-                .background(
-                    Brush.linearGradient(
-                        colors = if (expanded) listOf(
-                            Color(0xFF09090D),
-                            p.accent.copy(alpha = .34f),
-                            Color(0xFF111019),
-                            p.accent.copy(alpha = .22f)
-                        ) else listOf(
-                            Color(0xFF050507),
-                            Color(0xFF111016),
-                            p.accent.copy(alpha = .28f),
-                            Color(0xFF07070A)
-                        )
-                    )
+                .shadow(
+                    elevation = 6.dp + 18.dp * t, shape = shape,
+                    ambientColor = Color.Black, spotColor = Color.Black
                 )
-                .border(1.dp, Color.White.copy(alpha = .22f), RoundedCornerShape(corner))
-                .clickable { expanded = !expanded }
-                .padding(horizontal = 9.dp, vertical = if (expanded) 10.dp else 4.dp),
-            verticalArrangement = Arrangement.spacedBy(if (expanded) 9.dp else 0.dp)
-        ) {
-            Row(Modifier.fillMaxWidth().height(pillH - 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                // Cover stays on the left, matching the requested island layout.
-                Cover(song, Modifier.size((islandHeightDp - 9).coerceAtLeast(20).dp), 0.dp, p, 200, round = true)
-                Spacer(Modifier.width(8.dp))
-                if (expanded) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
-                        Text(song.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(song.artist, color = Color.White.copy(alpha = .72f), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                } else {
-                    Text(song.title, Modifier.weight(1f), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                .clip(shape)
+                .background(Color.Black)
+                .border(1.dp, Color.White.copy(alpha = 0.08f + 0.05f * t), shape)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onPress = {
+                            pressed = true
+                            tryAwaitRelease()
+                            pressed = false
+                        },
+                        onTap = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            expanded = !expanded
+                        }
+                    )
                 }
-                Spacer(Modifier.width(7.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    repeat(5) { i ->
-                        val base = listOf(5, 11, 7, 15, 8)[i].toFloat()
-                        val barHeight = if (isPlaying) (base * wavePhase * (if (i % 2 == 0) 1f else .82f)).dp else 3.dp
-                        Box(Modifier.width(2.5.dp).height(barHeight).clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = if (isPlaying) .96f else .48f)))
-                    }
+        ) {
+            // ───────── compact pill ─────────
+            if (compactAlpha > 0.01f) {
+                Row(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .height(pillH)
+                        .padding(horizontal = 5.dp)
+                        .graphicsLayer { alpha = compactAlpha },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Cover(song, Modifier.size((islandHeightDp - 8).coerceAtLeast(20).dp), 0.dp, p, 200, round = true)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        song.title, Modifier.weight(1f), color = Color.White, fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    IslandWave(isPlaying, wavePhase, Color.White, 0.85f)
+                    Spacer(Modifier.width(6.dp))
                 }
             }
-            if (expanded) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                    IslandControl(Glyph.Shuffle, if (shuffle) Color.White else Color.White.copy(alpha = .7f), "Shuffle", onShuffle)
-                    IslandControl(Glyph.Prev, Color.White, "Previous", onPrev)
-                    IslandControl(if (isPlaying) Glyph.Pause else Glyph.Play, Color.White, if (isPlaying) "Pause" else "Play", onToggle, large = true)
-                    IslandControl(Glyph.Next, Color.White, "Next", onNext)
-                    IslandControl(Glyph.Repeat, if (repeatMode != Player.REPEAT_MODE_OFF) Color.White else Color.White.copy(alpha = .7f), "Repeat", onRepeat)
+
+            // ───────── expanded panel ─────────
+            if (contentAlpha > 0.01f) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                        .graphicsLayer {
+                            alpha = contentAlpha
+                            translationY = (1f - contentAlpha) * -10.dp.toPx()
+                        },
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    // header: cover · title/artist · wave
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Cover(song, Modifier.size(46.dp), 12.dp, p, 300)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                song.title, color = Color.White, fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                song.artist, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        IslandWave(isPlaying, wavePhase, Color.White, 1f)
+                    }
+
+                    // progress
+                    val dur = song.durationMs
+                    val frac = if (dur > 0) (position.toFloat() / dur).coerceIn(0f, 1f) else 0f
+                    Column {
+                        Box(
+                            Modifier.fillMaxWidth().height(4.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(Color.White.copy(alpha = 0.18f))
+                        ) {
+                            Box(
+                                Modifier.fillMaxHeight().fillMaxWidth(frac)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Color.White)
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Row(Modifier.fillMaxWidth()) {
+                            Text(formatTime(position), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                            Spacer(Modifier.weight(1f))
+                            Text(formatTime(dur), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                        }
+                    }
+
+                    // controls
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IslandButton(Glyph.Shuffle, if (shuffle) p.accent else Color.White.copy(alpha = 0.55f), 38.dp, 18.dp, onShuffle)
+                        IslandButton(Glyph.Prev, Color.White, 42.dp, 21.dp, onPrev)
+                        IslandButton(
+                            if (isPlaying) Glyph.Pause else Glyph.Play, Color.Black, 54.dp, 24.dp, onToggle,
+                            filled = Color.White
+                        )
+                        IslandButton(Glyph.Next, Color.White, 42.dp, 21.dp, onNext)
+                        IslandButton(
+                            Glyph.Repeat,
+                            if (repeatMode != Player.REPEAT_MODE_OFF) p.accent else Color.White.copy(alpha = 0.55f),
+                            38.dp, 18.dp, onRepeat
+                        )
+                    }
                 }
             }
         }
@@ -726,14 +845,61 @@ fun TopIsland(
 }
 
 @Composable
-private fun IslandControl(glyph: Glyph, color: Color, description: String, onClick: () -> Unit, large: Boolean = false) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier.size(if (large) 48.dp else 38.dp).clip(CircleShape)
-                .background(if (large) Color.White.copy(alpha = 0.12f) else Color.Transparent)
-                .clickable(onClick = onClick),
-            contentAlignment = Alignment.Center
-        ) { GlyphIcon(glyph, color, Modifier.size(if (large) 25.dp else 20.dp)) }
-        Text(description, color = Color.White.copy(alpha = 0.58f), fontSize = 9.sp, maxLines = 1)
+private fun IslandWave(playing: Boolean, phase: Float, color: Color, alpha: Float) {
+    val rest by animateFloatAsState(if (playing) 1f else 0f, tween(300), label = "islandWaveRest")
+    Row(
+        Modifier.height(18.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        repeat(5) { i ->
+            val base = listOf(5, 11, 7, 15, 8)[i].toFloat()
+            val h = 3f + (base * phase * (if (i % 2 == 0) 1f else 0.82f) - 3f) * rest
+            Box(
+                Modifier.width(2.5.dp).height(h.coerceAtLeast(3f).dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(color.copy(alpha = alpha * (0.5f + 0.5f * rest)))
+            )
+        }
+    }
+}
+
+/** Round island button: shrinks while pressed and springs back, with a soft pressed highlight. */
+@Composable
+private fun IslandButton(
+    glyph: Glyph,
+    color: Color,
+    size: androidx.compose.ui.unit.Dp,
+    iconSize: androidx.compose.ui.unit.Dp,
+    onClick: () -> Unit,
+    filled: Color? = null
+) {
+    var pressed by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        if (pressed) 0.82f else 1f,
+        spring(dampingRatio = 0.45f, stiffness = 600f),
+        label = "islandBtnScale"
+    )
+    val glow by animateFloatAsState(if (pressed) 1f else 0f, tween(120), label = "islandBtnGlow")
+    val onClickS by rememberUpdatedState(onClick)
+    Box(
+        Modifier
+            .size(size)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(CircleShape)
+            .background(filled ?: Color.White.copy(alpha = 0.14f * glow))
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        pressed = true
+                        tryAwaitRelease()
+                        pressed = false
+                    },
+                    onTap = { onClickS() }
+                )
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        GlyphIcon(glyph, color, Modifier.size(iconSize))
     }
 }

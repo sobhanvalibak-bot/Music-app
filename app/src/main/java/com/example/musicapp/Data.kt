@@ -143,8 +143,8 @@ class Settings(private val prefs: SharedPreferences) {
     var miniStyle by mutableIntStateOf(prefs.getInt("mini_style", 0).coerceIn(0, 1)); private set
     var noticeEnabled by mutableStateOf(prefs.getBoolean("notice_island_enabled", true)); private set
     /** User-adjustable Dynamic Island dimensions in dp. */
-    var islandWidth by mutableIntStateOf(prefs.getInt("dynamic_island_width", 184).coerceIn(180, 360)); private set
-    var islandHeight by mutableIntStateOf(prefs.getInt("dynamic_island_height", 38).coerceIn(30, 64)); private set
+    var islandWidth by mutableIntStateOf(prefs.getInt("dynamic_island_width", 250).coerceIn(180, 360)); private set
+    var islandHeight by mutableIntStateOf(prefs.getInt("dynamic_island_height", 36).coerceIn(30, 64)); private set
     /** 0 = compact, 1 = balanced, 2 = wide notification panel. */
     var noticeSize by mutableIntStateOf(prefs.getInt("notice_island_size", 1).coerceIn(0, 2)); private set
     /** 0 = black, 1 = translucent glass, 2 = accent-tinted. */

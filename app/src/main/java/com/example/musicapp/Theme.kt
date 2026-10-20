@@ -252,7 +252,7 @@ fun Cover(
 
 // ───────────────────────── Icons (drawn, no extra deps) ─────────────────────────
 
-enum class Glyph { Note, Album, Artist, Tune, Play, Pause, Next, Heart, HeartOutline, Back, Close, Plus, Prev, Shuffle, Repeat, ChevronDown, Edit, Search, Queue }
+enum class Glyph { Note, Album, Artist, Tune, Play, Pause, Next, Heart, HeartOutline, Back, Close, Plus, Prev, Shuffle, Repeat, ChevronDown, Edit, Search, Queue, Share, More, PlusCircle, Speaker }
 
 @Composable
 fun GlyphIcon(glyph: Glyph, color: Color, modifier: Modifier = Modifier) {
@@ -411,6 +411,34 @@ fun GlyphIcon(glyph: Glyph, color: Color, modifier: Modifier = Modifier) {
                     close()
                 }
                 drawPath(tri, color)
+            }
+            Glyph.Share -> {
+                val sw = w * 0.07f
+                val a = Offset(w * 0.78f, h * 0.20f)
+                val b = Offset(w * 0.22f, h * 0.50f)
+                val c = Offset(w * 0.78f, h * 0.80f)
+                drawLine(color, b, a, sw, StrokeCap.Round)
+                drawLine(color, b, c, sw, StrokeCap.Round)
+                drawCircle(color, w * 0.13f, a, style = Stroke(sw))
+                drawCircle(color, w * 0.13f, b, style = Stroke(sw))
+                drawCircle(color, w * 0.13f, c, style = Stroke(sw))
+            }
+            Glyph.More -> {
+                drawCircle(color, w * 0.075f, Offset(w * 0.5f, h * 0.2f))
+                drawCircle(color, w * 0.075f, Offset(w * 0.5f, h * 0.5f))
+                drawCircle(color, w * 0.075f, Offset(w * 0.5f, h * 0.8f))
+            }
+            Glyph.PlusCircle -> {
+                val sw = w * 0.07f
+                drawCircle(color, radius = w * 0.44f, center = Offset(w * 0.5f, h * 0.5f), style = Stroke(sw))
+                drawLine(color, Offset(w * 0.5f, h * 0.28f), Offset(w * 0.5f, h * 0.72f), sw, StrokeCap.Round)
+                drawLine(color, Offset(w * 0.28f, h * 0.5f), Offset(w * 0.72f, h * 0.5f), sw, StrokeCap.Round)
+            }
+            Glyph.Speaker -> {
+                val sw = w * 0.07f
+                drawRoundRect(color, Offset(w * 0.22f, h * 0.08f), GSize(w * 0.56f, h * 0.84f), CornerRadius(w * 0.1f), style = Stroke(sw))
+                drawCircle(color, radius = w * 0.14f, center = Offset(w * 0.5f, h * 0.62f), style = Stroke(sw))
+                drawCircle(color, radius = w * 0.04f, center = Offset(w * 0.5f, h * 0.27f))
             }
             Glyph.Next -> {
                 val path = Path().apply {

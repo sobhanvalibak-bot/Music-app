@@ -1,9 +1,6 @@
 package com.example.musicapp
 
-import android.Manifest
 import android.content.ContentUris
-import android.content.pm.PackageManager
-import android.os.Build
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
@@ -14,9 +11,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,54 +55,8 @@ fun VideoFeedScreen(p: Palette, mode: Int, topPad: androidx.compose.ui.unit.Dp, 
     val context = LocalContext.current
     var videos by remember { mutableStateOf<List<DeviceVideo>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
-    var hasPermission by remember { mutableStateOf(false) }
     var activeMode by remember(mode) { mutableIntStateOf(mode) }
-
-    val requestedPermissions = remember {
-        when {
-            Build.VERSION.SDK_INT >= 34 -> arrayOf(
-                Manifest.permission.READ_MEDIA_IMAGES,
-                Manifest.permission.READ_MEDIA_VIDEO,
-                "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
-            )
-            Build.VERSION.SDK_INT >= 33 -> arrayOf(
-                Manifest.permission.READ_MEDIA_IMAGES,
-                Manifest.permission.READ_MEDIA_VIDEO
-            )
-            else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-        }
-    }
-    fun mediaPermissionGranted(): Boolean = requestedPermissions.any {
-        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-    }
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) {
-        hasPermission = mediaPermissionGranted()
-        if (hasPermission) {
-            loading = true
-        } else {
-            loading = false
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        hasPermission = mediaPermissionGranted()
-        if (hasPermission) {
-            videos = loadDeviceVideos(context)
-            loading = false
-        } else {
-            loading = false
-            permissionLauncher.launch(requestedPermissions)
-        }
-    }
-    LaunchedEffect(hasPermission) {
-        if (hasPermission) {
-            loading = true
-            videos = loadDeviceVideos(context)
-            loading = false
-        }
-    }
+    LaunchedEffect(Unit) { videos = loadDeviceVideos(context); loading = false }
     val shown = videos
     Column(Modifier.fillMaxSize().background(Color.Black).padding(top = topPad)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -129,12 +77,6 @@ fun VideoFeedScreen(p: Palette, mode: Int, topPad: androidx.compose.ui.unit.Dp, 
         }
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = p.accent) }
-            !hasPermission -> Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Photos and videos permission is needed to show your device media.", color = Color.White.copy(alpha = .78f))
-                    Button(onClick = { permissionLauncher.launch(requestedPermissions) }) { Text("Allow photos and videos") }
-                }
-            }
             shown.isEmpty() -> Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
                 Text("No videos found. Add videos to your phone and reopen this section.", color = Color.White.copy(alpha = .65f))
             }

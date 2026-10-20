@@ -64,6 +64,8 @@ class MainActivity : ComponentActivity() {
                     navigationBarStyle = if (dark) SystemBarStyle.dark(transparent)
                     else SystemBarStyle.light(transparent, transparent)
                 )
+                // enableEdgeToEdge can bring the bar back: hide it again
+                hideStatusBar()
                 onDispose { }
             }
 
@@ -90,6 +92,17 @@ class MainActivity : ComponentActivity() {
 
     private fun hideStatusBar() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        @Suppress("DEPRECATION")
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        // draw into the camera cut-out area too, otherwise a black strip stays at the top
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode =
+                    if (android.os.Build.VERSION.SDK_INT >= 30)
+                        android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                    else android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
         WindowInsetsControllerCompat(window, window.decorView).apply {
             hide(WindowInsetsCompat.Type.statusBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE

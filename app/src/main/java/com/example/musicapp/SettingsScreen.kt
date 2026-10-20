@@ -19,25 +19,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
 
 // ───────────────────────── Settings screen ─────────────────────────
-
-private fun permissionLabel(permission: String): String = when (permission) {
-    Manifest.permission.READ_MEDIA_AUDIO -> "music/audio"
-    Manifest.permission.READ_MEDIA_IMAGES -> "photos"
-    Manifest.permission.READ_MEDIA_VIDEO -> "videos"
-    "android.permission.READ_MEDIA_VISUAL_USER_SELECTED" -> "selected photos/videos"
-    Manifest.permission.READ_EXTERNAL_STORAGE -> "media storage"
-    Manifest.permission.POST_NOTIFICATIONS -> "notifications"
-    else -> permission.substringAfterLast('.')
-}
 
 @Composable
 fun SettingsCard(title: String, p: Palette, content: @Composable ColumnScope.() -> Unit) {
@@ -97,59 +80,9 @@ fun SettingsTab(
     onPickBannerVideo: () -> Unit,
     onBack: () -> Unit
 ) {
-    val context = LocalContext.current
-    val permissionNames = remember {
-        buildList {
-            if (Build.VERSION.SDK_INT >= 33) {
-                add(Manifest.permission.READ_MEDIA_AUDIO)
-                add(Manifest.permission.READ_MEDIA_IMAGES)
-                add(Manifest.permission.READ_MEDIA_VIDEO)
-                if (Build.VERSION.SDK_INT >= 34) add("android.permission.READ_MEDIA_VISUAL_USER_SELECTED")
-                add(Manifest.permission.POST_NOTIFICATIONS)
-            } else {
-                add(Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
-        }
-    }
-    var permissionCheckMessage by remember { mutableStateOf<String?>(null) }
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { result ->
-        val denied = result.filterValues { !it }.keys
-        permissionCheckMessage = if (denied.isEmpty()) {
-            "All requested permissions are granted."
-        } else {
-            "Still missing: " + denied.joinToString { permissionLabel(it) }
-        }
-    }
-    fun checkPermissions() {
-        val missing = permissionNames.filter { permission ->
-            ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED
-        }
-        if (missing.isEmpty()) {
-            permissionCheckMessage = "All requested permissions are granted."
-        } else {
-            permissionCheckMessage = "Requesting missing permissions…"
-            permissionLauncher.launch(missing.toTypedArray())
-        }
-    }
-
     LazyColumn(contentPadding = PaddingValues(top = topPad, bottom = bottomPad)) {
         item { BackBar("Profile", p, onBack) }
         item { LargeTitle("Settings", "Make it yours", p) }
-        item {
-            SettingsCard("Permissions", p) {
-                Text("Check access to music, photos, videos and notifications. Any missing permission will be requested immediately.", fontSize = 13.sp, color = p.secondary)
-                Spacer(Modifier.height(10.dp))
-                Button(onClick = { checkPermissions() }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = p.accent)) {
-                    Text("Test permissions", color = Color.White)
-                }
-                permissionCheckMessage?.let {
-                    Spacer(Modifier.height(8.dp))
-                    Text(it, fontSize = 12.sp, color = p.text)
-                }
-            }
-        }
         item {
             SettingsCard("Profile media", p) {
                 Text("Profile picture and animated banner are managed here. MP4 videos up to 50 MB loop automatically.", fontSize = 13.sp, color = p.secondary)

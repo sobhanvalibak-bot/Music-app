@@ -11,6 +11,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -27,13 +28,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -94,26 +95,36 @@ class NoticeListenerService : NotificationListenerService() {
         ) return
 
         val extras = n.extras
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
-        val text = (extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
-            ?: extras.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty()
-        if (title.isBlank() && text.isBlank()) return
-
         val pm = packageManager
         val appName = try {
             pm.getApplicationLabel(pm.getApplicationInfo(sbn.packageName, 0)).toString()
         } catch (e: Exception) {
-            sbn.packageName
+            sbn.packageName.substringAfterLast('.').replaceFirstChar { it.uppercase() }
         }
-        // Prefer the actual notification artwork/cover, falling back to the app icon.
+        // chat apps often keep the real message inside MessagingStyle / inbox lines
+        val lastMessage = try {
+            @Suppress("DEPRECATION")
+            (extras.getParcelableArray(Notification.EXTRA_MESSAGES)?.lastOrNull() as? android.os.Bundle)
+                ?.getCharSequence("text")?.toString()
+        } catch (e: Exception) { null }
+        val lastLine = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)?.lastOrNull()?.toString()
+        val title = (extras.getCharSequence(Notification.EXTRA_TITLE_BIG)
+            ?: extras.getCharSequence(Notification.EXTRA_TITLE)
+            ?: extras.getCharSequence("android.conversationTitle"))?.toString().orEmpty()
+        val text = (extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
+            ?: extras.getCharSequence(Notification.EXTRA_TEXT)
+            ?: lastMessage ?: lastLine
+            ?: extras.getCharSequence(Notification.EXTRA_SUB_TEXT)
+            ?: n.tickerText)?.toString().orEmpty()
+        if (title.isBlank() && text.isBlank()) return
+
+        // The picture on the island is the icon of the app that sent the notification.
         val icon = try {
-            val cover = (extras.get(Notification.EXTRA_PICTURE) as? Bitmap)
-                ?: (extras.get(Notification.EXTRA_LARGE_ICON_BIG) as? Bitmap)
-                ?: (extras.get(Notification.EXTRA_LARGE_ICON) as? Bitmap)
-            if (cover != null) cover.toImageBitmap(128)
-            else pm.getApplicationIcon(sbn.packageName).toImageBitmap(96)
+            pm.getApplicationIcon(sbn.packageName).toImageBitmap(128)
         } catch (e: Exception) {
-            try { pm.getApplicationIcon(sbn.packageName).toImageBitmap(96) } catch (_: Exception) { null }
+            try {
+                n.smallIcon?.loadDrawable(this)?.toImageBitmap(128)
+            } catch (_: Exception) { null }
         }
         val notice = Notice(sbn.key, appName, icon, title, text)
         main.post { NoticeBus.publish(notice) }
@@ -140,12 +151,26 @@ private fun Drawable.toImageBitmap(size: Int): ImageBitmap {
 fun isNoticeAccessEnabled(context: Context): Boolean =
     NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
 
+/** After an update/reinstall Android may leave the listener unbound: ask it to reconnect. */
+fun rebindNoticeListener(context: Context) {
+    try {
+        if (isNoticeAccessEnabled(context)) {
+            NotificationListenerService.requestRebind(
+                android.content.ComponentName(context, NoticeListenerService::class.java)
+            )
+        }
+    } catch (_: Exception) {
+    }
+}
+
 // ───────────────────────── UI ─────────────────────────
 
 /**
- * The island that drops down when a notification arrives: app icon on the left, app name next to it.
- * Tap: shows the notification text. Drag it away (up or sideways) to dismiss. Closes by itself after a few seconds
- * unless it is opened.
+ * The notification island. It looks like the music Dynamic Island: a black pill with the icon of the
+ * app that sent the notification on the left and the app name next to it.
+ *  - Tap: the pill grows (springy) and shows the title and the description.
+ *  - Drag it away (up or sideways) to dismiss. It closes by itself after five seconds.
+ * The music island is laid out below it by the caller, so the two never overlap.
  */
 @Composable
 fun NoticeIsland(
@@ -154,33 +179,53 @@ fun NoticeIsland(
     panelSize: Int = 1,
     tint: Int = 0,
     accent: Color = Color(0xFF0A84FF),
+    islandWidthDp: Int = 250,
+    islandHeightDp: Int = 36,
     modifier: Modifier = Modifier
 ) {
-    val density = LocalDensity.current
-    val statusH = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
     var expanded by remember(notice.key) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val offX = remember(notice.key) { Animatable(0f) }
     val offY = remember(notice.key) { Animatable(0f) }
+    val pop = remember(notice.key) { Animatable(1f) }
     val onDismissS by rememberUpdatedState(onDismiss)
-    val shape = RoundedCornerShape(if (expanded) 28.dp else 40.dp)
+    val screenW = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
+
+    // 0f = compact pill, 1f = expanded panel
+    val t by androidx.compose.animation.core.animateFloatAsState(
+        if (expanded) 1f else 0f,
+        spring(dampingRatio = 0.62f, stiffness = 300f), label = "noticeT"
+    )
+    val pillH = islandHeightDp.dp
+    val expandedW = when (panelSize) { 0 -> 300.dp; 2 -> screenW - 28.dp; else -> 340.dp }.coerceAtMost(screenW - 28.dp)
+    val width = androidx.compose.ui.unit.lerp(islandWidthDp.dp, expandedW, t)
+    val corner = androidx.compose.ui.unit.lerp(pillH / 2, 30.dp, t.coerceIn(0f, 1f))
+    val shape = RoundedCornerShape(corner)
+    val padH = androidx.compose.ui.unit.lerp(5.dp, 16.dp, t.coerceIn(0f, 1f))
+    val padV = androidx.compose.ui.unit.lerp(4.dp, 14.dp, t.coerceIn(0f, 1f))
+
+    val contentAlpha by androidx.compose.animation.core.animateFloatAsState(
+        if (expanded) 1f else 0f,
+        if (expanded) androidx.compose.animation.core.tween(240, delayMillis = 100) else androidx.compose.animation.core.tween(80),
+        label = "noticeContent"
+    )
 
     // The timeout is always five seconds, even if the user opens the description.
+    LaunchedEffect(notice.key) {
+        pop.snapTo(1.06f)
+        pop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 380f))
+    }
     LaunchedEffect(notice.key) {
         delay(5000)
         onDismissS()
     }
-    val panelWidth = when (panelSize) { 0 -> 0.66f; 2 -> 1f; else -> 0.84f }
     val panelColor = when (tint) {
-        1 -> Color(0xFF202024).copy(alpha = 0.88f)
-        2 -> accent.copy(alpha = 0.88f)
+        1 -> Color(0xFF202024).copy(alpha = 0.92f)
+        2 -> accent.copy(alpha = 0.92f)
         else -> Color.Black
     }
 
-    Box(
-        modifier.fillMaxWidth().padding(top = statusH + 8.dp, start = 14.dp, end = 14.dp),
-        contentAlignment = Alignment.TopCenter
-    ) {
+    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         Column(
             Modifier
                 .pointerInput(notice.key) {
@@ -221,35 +266,74 @@ fun NoticeIsland(
                 .graphicsLayer {
                     val far = maxOf(abs(offX.value) / 400f, abs(offY.value) / 200f).coerceIn(0f, 1f)
                     alpha = 1f - far * 0.8f
+                    scaleX = pop.value; scaleY = pop.value
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
                 }
-                .widthIn(max = 420.dp)
-                .fillMaxWidth(if (expanded) 1f else panelWidth)
-                .animateContentSize(spring(dampingRatio = 0.8f, stiffness = 400f))
+                .width(width)
+                .animateContentSize(spring(dampingRatio = 0.8f, stiffness = 380f))
+                .shadow(6.dp + 16.dp * t, shape, ambientColor = Color.Black, spotColor = Color.Black)
                 .clip(shape)
                 .background(panelColor)
-                .border(1.dp, Color.White.copy(alpha = 0.14f), shape)
-                .padding(9.dp)
+                .border(1.dp, Color.White.copy(alpha = 0.08f + 0.06f * t), shape)
+                .padding(horizontal = padH, vertical = padV)
         ) {
-            Box(
-                Modifier.fillMaxWidth().height(if (expanded) 72.dp else 48.dp),
-                contentAlignment = Alignment.Center
+            // header: app icon · app name · "new" dot
+            Row(
+                Modifier.fillMaxWidth().height(if (expanded) 46.dp else pillH - 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                val iconSize = if (expanded) 44.dp else (islandHeightDp - 8).coerceAtLeast(20).dp
+                val iconShape = if (expanded) RoundedCornerShape(13.dp) else CircleShape
                 if (notice.icon != null) {
                     Image(
-                        bitmap = notice.icon, contentDescription = "Notification cover",
+                        bitmap = notice.icon, contentDescription = notice.appName,
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier.size(if (expanded) 64.dp else 44.dp).clip(RoundedCornerShape(if (expanded) 16.dp else 13.dp))
+                        modifier = Modifier.size(iconSize).clip(iconShape)
                     )
                 } else {
-                    Box(Modifier.size(if (expanded) 64.dp else 44.dp).clip(RoundedCornerShape(13.dp)).background(Color.White.copy(alpha = 0.12f)))
+                    Box(Modifier.size(iconSize).clip(iconShape).background(Color.White.copy(alpha = 0.14f)))
+                }
+                Spacer(Modifier.width(if (expanded) 12.dp else 8.dp))
+                if (expanded) {
+                    Column(Modifier.weight(1f).graphicsLayer { alpha = contentAlpha }) {
+                        Text(
+                            notice.appName, fontSize = 11.sp, color = Color.White.copy(alpha = 0.55f),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis
+                        )
+                        if (notice.title.isNotBlank()) {
+                            Text(
+                                notice.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        notice.appName, Modifier.weight(1f), color = Color.White, fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
+                    val blink = androidx.compose.animation.core.rememberInfiniteTransition(label = "noticeDot")
+                    val dotAlpha by blink.animateFloat(
+                        0.35f, 1f,
+                        androidx.compose.animation.core.infiniteRepeatable(
+                            androidx.compose.animation.core.tween(700),
+                            androidx.compose.animation.core.RepeatMode.Reverse
+                        ), label = "dotAlpha"
+                    )
+                    Box(
+                        Modifier.padding(end = 8.dp).size(7.dp).clip(CircleShape)
+                            .background(Color.White.copy(alpha = dotAlpha))
+                    )
                 }
             }
+            // description
             if (expanded && notice.text.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    notice.text, fontSize = 14.sp, color = Color.White.copy(alpha = 0.9f),
+                    notice.text, fontSize = 14.sp, lineHeight = 19.sp, color = Color.White.copy(alpha = 0.92f),
                     maxLines = 8, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp)
+                        .graphicsLayer { alpha = contentAlpha }
                 )
             }
         }

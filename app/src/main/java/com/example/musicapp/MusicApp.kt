@@ -21,6 +21,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.zIndex
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -86,6 +88,7 @@ fun MusicApp(
         )
     }
     var askNoticeAccess by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { rebindNoticeListener(context) }
     val notifLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
@@ -462,7 +465,7 @@ fun MusicApp(
         }
     }
 
-    val topPad = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 8.dp
+    val topPad = WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding() + 8.dp
     val bottomPad = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() +
         (if (current != null) 164.dp else 104.dp)
     val sortSubtitle = SortSubtitles[settings.sort.coerceIn(0, 2)]
@@ -761,52 +764,61 @@ fun MusicApp(
             }
         }
 
-        // Incoming notifications use the same top area as the cover-only Dynamic Island.
+        // Notification island on top; the music Dynamic Island is pushed down below it.
         val notice = NoticeBus.current
         var shownNotice by remember { mutableStateOf<Notice?>(null) }
         LaunchedEffect(notice) { if (notice != null) shownNotice = notice }
 
-        if (settings.miniStyle == 1) {
-            current?.let { song ->
-                AnimatedVisibility(
-                    visible = notice == null || !settings.noticeEnabled,
-                    enter = fadeIn(),
-                    exit = fadeOut(),
-                    modifier = Modifier.align(Alignment.TopCenter)
-                ) {
-                    TopIsland(
-                        song = song,
-                        p = p,
-                        isPlaying = isPlaying,
-                        isFav = favSet.contains(song.id),
-                        shuffle = shuffle,
-                        repeatMode = repeatMode,
-                        onToggle = { controller?.let { if (it.isPlaying) it.pause() else it.play() } },
-                        onNext = { controller?.let { if (it.hasNextMediaItem()) it.seekToNextMediaItem() } },
-                        onPrev = { controller?.let { if (it.hasPreviousMediaItem()) it.seekToPreviousMediaItem() else it.seekTo(0) } },
-                        onFav = { profile.toggleFavorite(song.id) },
-                        onShuffle = { controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } },
-                        onRepeat = { controller?.let { it.repeatMode = when (it.repeatMode) { Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL; Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE; else -> Player.REPEAT_MODE_OFF } } },
+        val islandDensity = LocalDensity.current
+        val islandStatusH = with(islandDensity) { WindowInsets.statusBarsIgnoringVisibility.getTop(islandDensity).toDp() }
+        val islandTop = ((islandStatusH - settings.islandHeight.dp) / 2).coerceAtLeast(4.dp)
+        Column(
+            Modifier.align(Alignment.TopCenter).zIndex(2f).fillMaxWidth().padding(top = islandTop),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            AnimatedVisibility(
+                visible = notice != null && settings.noticeEnabled,
+                enter = slideInVertically(spring(dampingRatio = 0.7f, stiffness = 300f)) { -it * 2 } +
+                    fadeIn() + expandVertically(spring(dampingRatio = 0.8f, stiffness = 320f)),
+                exit = slideOutVertically { -it * 2 } + fadeOut() +
+                    shrinkVertically(spring(dampingRatio = 0.9f, stiffness = 380f))
+            ) {
+                shownNotice?.let {
+                    NoticeIsland(
+                        notice = it,
+                        onDismiss = { NoticeBus.dismiss() },
+                        panelSize = settings.noticeSize,
+                        tint = settings.noticeTint,
+                        accent = p.accent,
                         islandWidthDp = settings.islandWidth,
-                        islandHeightDp = settings.islandHeight
+                        islandHeightDp = settings.islandHeight,
+                        modifier = Modifier.padding(bottom = 8.dp)
                     )
                 }
             }
-        }
-        AnimatedVisibility(
-            visible = notice != null && settings.noticeEnabled,
-            enter = slideInVertically(spring(dampingRatio = 0.7f, stiffness = 300f)) { -it * 2 } + fadeIn(),
-            exit = slideOutVertically { -it * 2 } + fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter).zIndex(2f)
-        ) {
-            shownNotice?.let {
-                NoticeIsland(
-                    notice = it,
-                    onDismiss = { NoticeBus.dismiss() },
-                    panelSize = settings.noticeSize,
-                    tint = settings.noticeTint,
-                    accent = p.accent
-                )
+            if (settings.miniStyle == 1) {
+                current?.let { song ->
+                    AnimatedVisibility(visible = !showPlayer, enter = fadeIn(), exit = fadeOut()) {
+                        TopIsland(
+                            song = song,
+                            p = p,
+                            isPlaying = isPlaying,
+                            isFav = favSet.contains(song.id),
+                            shuffle = shuffle,
+                            repeatMode = repeatMode,
+                            onToggle = { controller?.let { if (it.isPlaying) it.pause() else it.play() } },
+                            onNext = { controller?.let { if (it.hasNextMediaItem()) it.seekToNextMediaItem() } },
+                            onPrev = { controller?.let { if (it.hasPreviousMediaItem()) it.seekToPreviousMediaItem() else it.seekTo(0) } },
+                            onFav = { profile.toggleFavorite(song.id) },
+                            onShuffle = { controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } },
+                            onRepeat = { controller?.let { it.repeatMode = when (it.repeatMode) { Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL; Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE; else -> Player.REPEAT_MODE_OFF } } },
+                            islandWidthDp = settings.islandWidth,
+                            islandHeightDp = settings.islandHeight,
+                            position = position,
+                            reserveTop = false
+                        )
+                    }
+                }
             }
         }
 

@@ -35,6 +35,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.layout.onSizeChanged
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 // ───────────────────────── Queue model ─────────────────────────
 
@@ -111,20 +120,38 @@ fun FullPlayer(
     val shownMs = if (dragging) (dragValue * duration).toLong() else position
 
     val coverScale by animateFloatAsState(
-        if (isPlaying) 1f else 0.88f,
+        if (isPlaying) 1f else 0.9f,
         spring(dampingRatio = 0.6f, stiffness = 300f),
         label = "coverScale"
     )
 
+    // Spotify-like look: always dark, tinted by the cover colour at the top
+    val fg = Color.White
+    val sub = Color.White.copy(alpha = 0.66f)
+    val topTint = lerp(Color(0xFF0B0B0B), p.accent, if (p.tinted) 0.30f else 0.34f)
+    val tintAnim by animateColorAsState(topTint, tween(600), label = "playerTint")
+
+    // synced lyrics for the little lyric line and the "Lyrics preview" card
+    var lyricLines by remember(song.id) { mutableStateOf<List<LrcLine>>(emptyList()) }
+    LaunchedEffect(song.id) {
+        var found = withContext(Dispatchers.IO) { LyricsStore.load(context, song.id) }
+        if (found.isEmpty() && LyricsStore.shouldTryEmbedded(song.id)) {
+            val text = TagEditor.readLyrics(context, song)
+            if (text.isNotBlank()) {
+                LyricsStore.saveText(context, song.id, text)
+                found = parseLrc(text)
+            }
+        }
+        lyricLines = found
+    }
+    val lyricSynced = lyricLines.isNotEmpty() && lyricLines.first().timeMs >= 0L
+    val activeLyric = if (lyricSynced) lyricLines.indexOfLast { it.timeMs <= position + 120L } else -1
+    val currentLine = if (activeLyric >= 0) lyricLines[activeLyric].text else if (!lyricSynced && lyricLines.isNotEmpty()) lyricLines.first().text else ""
+
     Box(
         Modifier
             .fillMaxSize()
-            .background(p.bgBrush)
-            .background(
-                Brush.verticalGradient(
-                    listOf(p.accent.copy(alpha = if (p.tinted) 0.20f else 0.32f), Color.Transparent)
-                )
-            )
+            .background(Brush.verticalGradient(listOf(tintAnim, Color(0xFF0E0E0E), Color(0xFF0A0A0A))))
             .pointerInput(Unit) {
                 var total = 0f
                 detectVerticalDragGestures(
@@ -138,234 +165,202 @@ fun FullPlayer(
         Column(
             Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 28.dp),
+                .windowInsetsPadding(WindowInsets.statusBarsIgnoringVisibility)
+                .navigationBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top bar
+            // ── Top bar: chevron · "Playing from" · more ──
             Row(
-                Modifier.fillMaxWidth().padding(top = 6.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp).padding(top = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    Modifier.size(44.dp).clip(CircleShape).clickable { onClose() },
-                    contentAlignment = Alignment.Center
-                ) { GlyphIcon(Glyph.ChevronDown, p.text, Modifier.size(24.dp)) }
-                Spacer(Modifier.weight(1f))
-                Text("Now Playing", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = p.secondary)
-                Spacer(Modifier.weight(1f))
-                Box(
-                    Modifier.size(40.dp).clip(CircleShape).clickable {
-                        try {
-                            val shareText = "${song.title} — ${song.artist}" + if (song.album.isNotBlank()) "\n${song.album}" else ""
-                            val send = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_SUBJECT, song.title)
-                                putExtra(Intent.EXTRA_TEXT, shareText)
-                            }
-                            context.startActivity(Intent.createChooser(send, "Share song"))
-                        } catch (_: Exception) {
-                            Toast.makeText(context, "Unable to share this song", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    contentAlignment = Alignment.Center
-                ) { Text("↗", fontSize = 23.sp, color = p.text) }
-                Box(
-                    Modifier.size(40.dp).clip(CircleShape).clickable { onEdit() },
-                    contentAlignment = Alignment.Center
-                ) { GlyphIcon(Glyph.Edit, p.text, Modifier.size(20.dp)) }
+                PlayerIconButton(Glyph.ChevronDown, fg, 44.dp, 26.dp, onClick = onClose)
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { showAlbum = true }
+                        .padding(vertical = 2.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Playing from Album", fontSize = 12.sp, color = sub, maxLines = 1)
+                    Text(
+                        song.album.ifBlank { song.title }, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                        color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
+                }
+                PlayerIconButton(Glyph.More, fg, 44.dp, 22.dp, onClick = onEdit)
             }
 
-            Spacer(Modifier.weight(0.5f))
+            // ── Cover: wide, rounded, fits whatever space is left ──
+            Box(
+                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 22.dp, vertical = 14.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Cover(
+                    song,
+                    Modifier
+                        .aspectRatio(1f)
+                        .graphicsLayer {
+                            scaleX = coverScale
+                            scaleY = coverScale
+                            shadowElevation = 28.dp.toPx()
+                            shape = RoundedCornerShape(16.dp)
+                            clip = false
+                            ambientShadowColor = Color.Black
+                            spotShadowColor = Color.Black
+                        },
+                    16.dp, p, 1600
+                )
+            }
 
-            Cover(
-                song,
-                Modifier
-                    .fillMaxWidth(0.86f)
-                    .aspectRatio(1f)
-                    .graphicsLayer {
-                        scaleX = coverScale
-                        scaleY = coverScale
+            // ── Current lyric line (like Spotify) ──
+            Box(Modifier.fillMaxWidth().padding(horizontal = 22.dp).heightIn(min = 30.dp)) {
+                AnimatedContent(
+                    targetState = currentLine,
+                    transitionSpec = {
+                        (fadeIn(tween(260, delayMillis = 60)) + slideInVertically(tween(260)) { it / 3 }) togetherWith
+                            (fadeOut(tween(140)) + slideOutVertically(tween(200)) { -it / 3 })
                     },
-                28.dp, p, 1600
-            )
+                    label = "lyricLine"
+                ) { line ->
+                    Text(
+                        line, fontSize = 19.sp, fontWeight = FontWeight.Bold, color = fg,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 24.sp
+                    )
+                }
+            }
 
-            Spacer(Modifier.weight(0.5f))
+            Spacer(Modifier.height(14.dp))
 
-            // Title + artists + actions
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            // ── Title · artists · add / like ──
+            Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
                         song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        fontSize = 22.sp, fontWeight = FontWeight.Bold, color = p.text
+                        fontSize = 25.sp, fontWeight = FontWeight.Bold, color = fg
                     )
                     FlowRow {
                         song.artists.forEachIndexed { i, name ->
                             Row {
                                 Text(
-                                    name, fontSize = 17.sp, color = p.accent,
+                                    name, fontSize = 18.sp, color = sub,
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(6.dp))
                                         .clickable { onArtist(name) }
                                         .padding(vertical = 2.dp)
                                 )
                                 if (i < song.artists.lastIndex) {
-                                    Text(", ", fontSize = 17.sp, color = p.secondary, modifier = Modifier.padding(vertical = 2.dp))
+                                    Text(", ", fontSize = 18.sp, color = sub, modifier = Modifier.padding(vertical = 2.dp))
                                 }
                             }
                         }
                     }
-                    // Album: tap to see every song of this album
-                    Row(
-                        Modifier
-                            .padding(top = 6.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(p.selectedPill)
-                            .clickable { showAlbum = true }
-                            .padding(start = 10.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        GlyphIcon(Glyph.Album, p.accent, Modifier.size(15.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            song.album, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                            color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 200.dp)
-                        )
-                    }
                 }
-                Box(
-                    Modifier.size(42.dp).clip(CircleShape).clickable { onAddToPlaylist() },
-                    contentAlignment = Alignment.Center
-                ) { GlyphIcon(Glyph.Plus, p.text, Modifier.size(22.dp)) }
-                Box(
-                    Modifier.size(42.dp).clip(CircleShape).clickable { onFav() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    GlyphIcon(
-                        if (isFav) Glyph.Heart else Glyph.HeartOutline,
-                        if (isFav) p.accent else p.text,
-                        Modifier.size(22.dp)
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
-
-            // Seek bar
-            Slider(
-                value = if (dragging) dragValue else frac,
-                onValueChange = {
-                    dragging = true
-                    dragValue = it
-                },
-                onValueChangeFinished = {
-                    onSeek((dragValue * duration).toLong())
-                    dragging = false
-                },
-                colors = SliderDefaults.colors(
-                    thumbColor = p.text,
-                    activeTrackColor = p.text,
-                    inactiveTrackColor = p.secondary.copy(alpha = 0.3f)
+                PlayerIconButton(
+                    if (isFav) Glyph.Heart else Glyph.HeartOutline,
+                    if (isFav) p.accent else fg, 46.dp, 26.dp, onClick = onFav, bounce = isFav
                 )
-            )
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-                Text(formatTime(shownMs), fontSize = 12.sp, color = p.secondary)
-                Spacer(Modifier.weight(1f))
-                Text(formatTime(duration), fontSize = 12.sp, color = p.secondary)
+                PlayerIconButton(Glyph.PlusCircle, fg, 46.dp, 30.dp, onClick = onAddToPlaylist)
             }
 
             Spacer(Modifier.height(14.dp))
 
-            // Controls
+            // ── Seek bar: thin line, small thumb ──
+            SpotifySeekBar(
+                value = if (dragging) dragValue else frac,
+                onChange = { dragging = true; dragValue = it },
+                onFinish = { onSeek((dragValue * duration).toLong()); dragging = false },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp)
+            )
+            Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
+                Text(formatTime(shownMs), fontSize = 12.sp, color = sub)
+                Spacer(Modifier.weight(1f))
+                Text(formatTime(duration), fontSize = 12.sp, color = sub)
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ── Controls: shuffle · prev · PLAY · next · repeat ──
             Row(
-                Modifier.fillMaxWidth(),
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    Modifier.size(48.dp).clip(CircleShape).clickable { onShuffle() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    GlyphIcon(Glyph.Shuffle, if (shuffle) p.accent else p.secondary, Modifier.size(22.dp))
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    PlayerIconButton(Glyph.Shuffle, if (shuffle) p.accent else fg, 50.dp, 26.dp, onClick = onShuffle)
+                    Box(Modifier.size(4.dp).clip(CircleShape).background(if (shuffle) p.accent else Color.Transparent))
                 }
-                Box(
-                    Modifier.size(56.dp).clip(CircleShape).clickable { onPrev() },
-                    contentAlignment = Alignment.Center
-                ) { GlyphIcon(Glyph.Prev, p.text, Modifier.size(28.dp)) }
-                Box(
-                    Modifier.size(72.dp).clip(CircleShape).background(p.text).clickable { onToggle() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    GlyphIcon(if (isPlaying) Glyph.Pause else Glyph.Play, p.bg, Modifier.size(30.dp))
-                }
-                Box(
-                    Modifier.size(56.dp).clip(CircleShape).clickable { onNext() },
-                    contentAlignment = Alignment.Center
-                ) { GlyphIcon(Glyph.Next, p.text, Modifier.size(28.dp)) }
-                Box(
-                    Modifier.size(48.dp).clip(CircleShape).clickable { onRepeat() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    val on = repeatMode != Player.REPEAT_MODE_OFF
-                    GlyphIcon(Glyph.Repeat, if (on) p.accent else p.secondary, Modifier.size(22.dp))
-                    if (repeatMode == Player.REPEAT_MODE_ONE) {
-                        Text("1", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = p.accent)
+                PlayerIconButton(Glyph.Prev, fg, 60.dp, 32.dp, onClick = onPrev)
+                PlayerIconButton(
+                    if (isPlaying) Glyph.Pause else Glyph.Play, Color.Black, 76.dp, 32.dp,
+                    onClick = onToggle, filled = Color.White, pressScale = 0.9f
+                )
+                PlayerIconButton(Glyph.Next, fg, 60.dp, 32.dp, onClick = onNext)
+                val repeatOn = repeatMode != Player.REPEAT_MODE_OFF
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(contentAlignment = Alignment.Center) {
+                        PlayerIconButton(Glyph.Repeat, if (repeatOn) p.accent else fg, 50.dp, 26.dp, onClick = onRepeat)
+                        if (repeatMode == Player.REPEAT_MODE_ONE) {
+                            Text("1", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = p.accent)
+                        }
                     }
+                    Box(Modifier.size(4.dp).clip(CircleShape).background(if (repeatOn) p.accent else Color.Transparent))
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(6.dp))
 
-            // Lyrics + playback options (speed, sleep timer, crossfade, equalizer, stats)
+            // ── Bottom row: playback options (left) · share · queue (right) ──
             Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(p.selectedPill)
-                        .clickable { showLyrics = true }
-                        .padding(horizontal = 14.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    GlyphIcon(Glyph.Note, p.text, Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Lyrics", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = p.text)
+                PlayerIconButton(Glyph.Tune, if (kotlin.math.abs(speed - 1f) < 0.01f) fg else p.accent, 46.dp, 24.dp, onClick = { showOptions = true })
+                Spacer(Modifier.weight(1f))
+                PlayerIconButton(Glyph.Share, fg, 46.dp, 24.dp, onClick = {
+                    try {
+                        val shareText = "${song.title} — ${song.artist}" + if (song.album.isNotBlank()) "\n${song.album}" else ""
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, song.title)
+                            putExtra(Intent.EXTRA_TEXT, shareText)
+                        }
+                        context.startActivity(Intent.createChooser(send, "Share song"))
+                    } catch (_: Exception) {
+                        Toast.makeText(context, "Unable to share this song", Toast.LENGTH_SHORT).show()
+                    }
+                })
+                PlayerIconButton(Glyph.Queue, fg, 46.dp, 24.dp, onClick = { showQueue = true })
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ── Lyrics preview card ──
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(lerp(Color(0xFF101010), p.accent, 0.28f))
+                    .clickable { showLyrics = true }
+                    .padding(horizontal = 18.dp, vertical = 14.dp)
+            ) {
+                Text("Lyrics preview", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = fg)
+                Spacer(Modifier.height(6.dp))
+                val preview = when {
+                    lyricLines.isEmpty() -> listOf("Tap to open lyrics")
+                    activeLyric >= 0 -> lyricLines.drop(activeLyric).take(2).map { it.text }
+                    else -> lyricLines.take(2).map { it.text }
                 }
-                Row(
-                    Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(p.selectedPill)
-                        .clickable { showQueue = true }
-                        .padding(horizontal = 14.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    GlyphIcon(Glyph.Queue, p.text, Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Queue", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = p.text)
-                }
-                Row(
-                    Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(p.selectedPill)
-                        .clickable { showOptions = true }
-                        .padding(horizontal = 14.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    GlyphIcon(Glyph.Tune, p.text, Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
+                preview.forEachIndexed { i, l ->
                     Text(
-                        if (kotlin.math.abs(speed - 1f) < 0.01f) "Playback" else "${speed}×",
-                        fontSize = 14.sp, fontWeight = FontWeight.Medium, color = p.text
+                        l.ifBlank { "♪" }, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                        color = fg.copy(alpha = if (i == 0) 0.95f else 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis
                     )
                 }
             }
-
-            Spacer(Modifier.weight(0.5f))
+            Spacer(Modifier.height(8.dp))
         }
 
         // Album page that slides up over the player
@@ -433,6 +428,111 @@ fun FullPlayer(
     }
 }
 
+// ───────────────────────── Player widgets ─────────────────────────
+
+/** Round icon button that shrinks while pressed and springs back (optionally filled, optionally bouncing). */
+@Composable
+private fun PlayerIconButton(
+    glyph: Glyph,
+    color: Color,
+    size: androidx.compose.ui.unit.Dp,
+    iconSize: androidx.compose.ui.unit.Dp,
+    onClick: () -> Unit,
+    filled: Color? = null,
+    pressScale: Float = 0.82f,
+    bounce: Boolean = false
+) {
+    var pressed by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        if (pressed) pressScale else 1f,
+        spring(dampingRatio = 0.45f, stiffness = 600f),
+        label = "btnScale"
+    )
+    // little pop when something turns on (e.g. the heart)
+    val pop = remember { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(bounce) {
+        if (bounce) {
+            pop.snapTo(1.35f)
+            pop.animateTo(1f, spring(dampingRatio = 0.35f, stiffness = 420f))
+        }
+    }
+    val onClickS by rememberUpdatedState(onClick)
+    Box(
+        Modifier
+            .size(size)
+            .graphicsLayer { scaleX = scale * pop.value; scaleY = scale * pop.value }
+            .clip(CircleShape)
+            .then(if (filled != null) Modifier.background(filled) else Modifier)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        pressed = true
+                        tryAwaitRelease()
+                        pressed = false
+                    },
+                    onTap = { onClickS() }
+                )
+            },
+        contentAlignment = Alignment.Center
+    ) { GlyphIcon(glyph, color, Modifier.size(iconSize)) }
+}
+
+/** Thin progress line with a small round thumb that grows while dragging, like Spotify. */
+@Composable
+private fun SpotifySeekBar(
+    value: Float,
+    onChange: (Float) -> Unit,
+    onFinish: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var widthPx by remember { mutableFloatStateOf(1f) }
+    var active by remember { mutableStateOf(false) }
+    val grow by animateFloatAsState(if (active) 1f else 0f, spring(dampingRatio = 0.6f, stiffness = 500f), label = "seekGrow")
+    val onChangeS by rememberUpdatedState(onChange)
+    val onFinishS by rememberUpdatedState(onFinish)
+    Box(
+        modifier
+            .height(28.dp)
+            .onSizeChanged { widthPx = it.width.toFloat().coerceAtLeast(1f) }
+            .pointerInput(Unit) {
+                detectTapGestures { off ->
+                    onChangeS((off.x / widthPx).coerceIn(0f, 1f))
+                    onFinishS()
+                }
+            }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = { off -> active = true; onChangeS((off.x / widthPx).coerceIn(0f, 1f)) },
+                    onHorizontalDrag = { change, _ ->
+                        change.consume()
+                        onChangeS((change.position.x / widthPx).coerceIn(0f, 1f))
+                    },
+                    onDragEnd = { active = false; onFinishS() },
+                    onDragCancel = { active = false; onFinishS() }
+                )
+            },
+        contentAlignment = Alignment.CenterStart
+    ) {
+        val trackH = 4.dp + 2.dp * grow
+        Box(
+            Modifier.fillMaxWidth().height(trackH).clip(RoundedCornerShape(50))
+                .background(Color.White.copy(alpha = 0.28f))
+        )
+        Box(
+            Modifier.fillMaxWidth(value.coerceIn(0f, 1f)).height(trackH).clip(RoundedCornerShape(50))
+                .background(Color.White)
+        )
+        val thumb = 12.dp + 4.dp * grow
+        Box(
+            Modifier
+                .offset { androidx.compose.ui.unit.IntOffset((value.coerceIn(0f, 1f) * widthPx - thumb.toPx() / 2f).toInt(), 0) }
+                .size(thumb)
+                .clip(CircleShape)
+                .background(Color.White)
+        )
+    }
+}
+
 @Composable
 private fun QueuePanel(
     queue: List<QueueEntry>,
@@ -455,7 +555,7 @@ private fun QueuePanel(
             .fillMaxSize()
             .background(p.bgBrush)
             .pointerInput(Unit) { detectTapGestures { } }
-            .statusBarsPadding()
+            .windowInsetsPadding(WindowInsets.statusBarsIgnoringVisibility)
     ) {
         Row(
             Modifier.fillMaxWidth().padding(start = 16.dp, end = 20.dp, top = 10.dp, bottom = 8.dp),
@@ -572,7 +672,7 @@ private fun AlbumPanel(
             .fillMaxSize()
             .background(p.bgBrush)
             .pointerInput(Unit) { detectTapGestures { } }
-            .statusBarsPadding()
+            .windowInsetsPadding(WindowInsets.statusBarsIgnoringVisibility)
     ) {
         Row(
             Modifier.fillMaxWidth().padding(start = 16.dp, end = 20.dp, top = 10.dp, bottom = 8.dp),
