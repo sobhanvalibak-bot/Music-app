@@ -632,8 +632,8 @@ fun TopIsland(
     onShuffle: () -> Unit,
     onRepeat: () -> Unit,
     modifier: Modifier = Modifier,
-    islandWidthDp: Int = 250,
-    islandHeightDp: Int = 36
+    islandWidthDp: Int = 184,
+    islandHeightDp: Int = 38
 ) {
     val density = LocalDensity.current
     val statusH = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
@@ -669,9 +669,21 @@ fun TopIsland(
                 .height(height)
                 .shadow(if (expanded) 24.dp else 12.dp, RoundedCornerShape(corner), ambientColor = p.accent.copy(alpha = .3f), spotColor = p.accent.copy(alpha = .25f))
                 .clip(RoundedCornerShape(corner))
+                // Keep the island genuinely dark; the cover/accent colours appear as soft,
+                // blurred-looking neon gradients rather than filling the whole capsule.
                 .background(
                     Brush.linearGradient(
-                        listOf(p.accent.copy(alpha = if (expanded) .96f else .88f), p.accent.copy(alpha = .68f), Color(0xFF101014))
+                        colors = if (expanded) listOf(
+                            Color(0xFF09090D),
+                            p.accent.copy(alpha = .34f),
+                            Color(0xFF111019),
+                            p.accent.copy(alpha = .22f)
+                        ) else listOf(
+                            Color(0xFF050507),
+                            Color(0xFF111016),
+                            p.accent.copy(alpha = .28f),
+                            Color(0xFF07070A)
+                        )
                     )
                 )
                 .border(1.dp, Color.White.copy(alpha = .22f), RoundedCornerShape(corner))
