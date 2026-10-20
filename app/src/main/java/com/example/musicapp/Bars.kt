@@ -56,325 +56,6 @@ import kotlin.math.roundToInt
 // ───────────────────────── Glass bars ─────────────────────────
 
 /**
- * Glass mini player.
- *  - Tap: open the full player. Pressing it makes it shrink a little, like on iOS.
- *  - Swipe left: next song. Swipe right: previous song.
- *    The card follows your finger and tilts, flies off the side, and the new song springs back in.
- *    When there is no next song the card resists and bounces back.
- */
-@Composable
-fun MiniPlayer(
-    song: Song,
-    isPlaying: Boolean,
-    isFav: Boolean,
-    p: Palette,
-    onOpen: () -> Unit,
-    onToggle: () -> Unit,
-    onNext: () -> Unit,
-    onPrev: () -> Unit,
-    canNext: () -> Boolean,
-    onFav: () -> Unit,
-    style: Int = 0,
-    flatDock: Boolean = false
-) {
-    val island = style == 1
-    // "card" look: white card with the cover on its edge, half hidden behind the dark tab bar
-    val card = !island && !flatDock
-    val shape: Shape = if (island) RoundedCornerShape(50) else if (card) RoundedCornerShape(28.dp) else RoundedCornerShape(24.dp)
-    val scope = rememberCoroutineScope()
-    val haptic = LocalHapticFeedback.current
-    val density = LocalDensity.current
-    val screenPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
-    val offsetX = remember { Animatable(0f) }
-    var pressed by remember { mutableStateOf(false) }
-    val press by animateFloatAsState(
-        if (pressed) 1f else 0f,
-        spring(dampingRatio = 0.6f, stiffness = 500f),
-        label = "miniPress"
-    )
-
-    // Dynamic Island: the pill "pops" a little each time the song changes
-    val pop = remember { Animatable(1f) }
-    LaunchedEffect(song.id) {
-        if (island) {
-            pop.snapTo(1.07f)
-            pop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 380f))
-        }
-    }
-
-    val onOpenS by rememberUpdatedState(onOpen)
-    val onNextS by rememberUpdatedState(onNext)
-    val onPrevS by rememberUpdatedState(onPrev)
-    val canNextS by rememberUpdatedState(canNext)
-
-    Row(
-        Modifier
-            .fillMaxWidth()
-            // gestures sit outside the moving layer, so finger positions stay stable while it moves
-            .pointerInput(Unit) {
-                var dragX = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = {
-                        pressed = false
-                        scope.launch { offsetX.stop() }
-                        dragX = offsetX.value
-                    },
-                    onHorizontalDrag = { change, dx ->
-                        change.consume()
-                        // no next song: resist when pulling left
-                        val factor = if (dx < 0f && dragX <= 0f && !canNextS()) 0.3f else 1f
-                        dragX += dx * factor
-                        val v = dragX
-                        scope.launch { offsetX.snapTo(v) }
-                    },
-                    onDragEnd = {
-                        val x = dragX
-                        val threshold = 90.dp.toPx()
-                        scope.launch {
-                            if (x < -threshold && canNextS()) {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                offsetX.animateTo(-screenPx, tween(150))
-                                onNextS()
-                                offsetX.snapTo(screenPx * 0.6f)
-                                offsetX.animateTo(0f, spring(dampingRatio = 0.78f, stiffness = 380f))
-                            } else if (x > threshold) {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                offsetX.animateTo(screenPx, tween(150))
-                                onPrevS()
-                                offsetX.snapTo(-screenPx * 0.6f)
-                                offsetX.animateTo(0f, spring(dampingRatio = 0.78f, stiffness = 380f))
-                            } else {
-                                offsetX.animateTo(0f, spring(dampingRatio = 0.55f, stiffness = 450f))
-                            }
-                        }
-                    },
-                    onDragCancel = {
-                        scope.launch { offsetX.animateTo(0f, spring(dampingRatio = 0.55f, stiffness = 450f)) }
-                    }
-                )
-            }
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onPress = {
-                        pressed = true
-                        tryAwaitRelease()
-                        pressed = false
-                    },
-                    onTap = { onOpenS() }
-                )
-            }
-            .graphicsLayer {
-                val frac = (abs(offsetX.value) / screenPx).coerceIn(0f, 1f)
-                translationX = offsetX.value
-                rotationZ = offsetX.value / screenPx * 5f
-                alpha = 1f - frac * 0.85f
-                val sc = (1f - 0.035f * press - 0.05f * frac) * (if (island) pop.value else 1f)
-                scaleX = sc
-                scaleY = sc
-            }
-            .then(if (flatDock) Modifier else Modifier.padding(horizontal = 14.dp))
-            .then(
-                if (flatDock) Modifier
-                    .clip(RoundedCornerShape(0.dp))
-                    .background(p.card)
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                else if (island) Modifier
-                    .shadow(16.dp, shape, ambientColor = Color.Black.copy(alpha = 0.5f), spotColor = Color.Black.copy(alpha = 0.5f))
-                    .clip(shape)
-                    .background(Color.Black)
-                    .drawBehind {
-                        // Low-cost Liquid Neon rim, tinted by the active cover palette.
-                        drawRoundRect(
-                            brush = Brush.linearGradient(
-                                colors = listOf(p.accent.copy(alpha = if (island) 0.24f else 0.08f), Color.Transparent, p.accent.copy(alpha = if (island) 0.12f else 0.04f))
-                            ),
-                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f),
-                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.2.dp.toPx())
-                        )
-                    }
-                    .border(1.dp, Color.White.copy(alpha = 0.10f), shape)
-                    .padding(horizontal = 9.dp, vertical = 9.dp)
-                else if (card) Modifier
-                    .shadow(14.dp, shape, ambientColor = Color.Black.copy(alpha = 0.30f), spotColor = Color.Black.copy(alpha = 0.30f))
-                    .clip(shape)
-                    .background(p.miniCard)
-                    .height(MiniCardHeight)
-                else Modifier
-                    .glass(shape, p)
-                    .padding(horizontal = 8.dp, vertical = 7.dp)
-            ),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (island) {
-            IslandContent(song, isPlaying, isFav, p, onToggle, onNext, onFav)
-            return@Row
-        }
-        if (card) {
-            val navy = p.onMiniCard
-            // cover runs to the left edge and down behind the tab bar
-            Box(
-                Modifier.width(88.dp).fillMaxHeight()
-                    .clip(RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp))
-            ) { Cover(song, Modifier.fillMaxSize(), 0.dp, p, 400) }
-            Spacer(Modifier.width(14.dp))
-            // controls live in the part of the card that stays visible above the tab bar
-            Row(
-                Modifier.weight(1f).height(MiniCardHeight - MiniCardHidden).align(Alignment.Top),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        fontSize = 16.sp, fontWeight = FontWeight.Bold, color = navy
-                    )
-                    Text(
-                        song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        fontSize = 13.sp, color = navy.copy(alpha = 0.62f)
-                    )
-                }
-                Box(
-                    Modifier.size(40.dp).clip(CircleShape).clickable { onFav() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    GlyphIcon(
-                        if (isFav) Glyph.Heart else Glyph.HeartOutline,
-                        if (isFav) p.accent else navy,
-                        Modifier.size(22.dp)
-                    )
-                }
-                Spacer(Modifier.width(4.dp))
-                Box(
-                    Modifier.size(50.dp).clip(CircleShape).background(navy).clickable { onToggle() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    GlyphIcon(if (isPlaying) Glyph.Pause else Glyph.Play, p.miniCard, Modifier.size(22.dp))
-                }
-                Spacer(Modifier.width(10.dp))
-            }
-            return@Row
-        }
-        Cover(song, Modifier.size(42.dp), 11.dp, p, 300)
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = p.text
-            )
-            Text(
-                song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                fontSize = 12.sp, color = p.secondary
-            )
-        }
-        Box(
-            Modifier.size(38.dp).clip(CircleShape).clickable { onFav() },
-            contentAlignment = Alignment.Center
-        ) {
-            GlyphIcon(
-                if (isFav) Glyph.Heart else Glyph.HeartOutline,
-                if (isFav) p.accent else p.secondary,
-                Modifier.size(19.dp)
-            )
-        }
-        Box(
-            Modifier.size(40.dp).clip(CircleShape).clickable { onToggle() },
-            contentAlignment = Alignment.Center
-        ) {
-            GlyphIcon(if (isPlaying) Glyph.Pause else Glyph.Play, p.text, Modifier.size(20.dp))
-        }
-        Box(
-            Modifier.size(40.dp).clip(CircleShape).clickable { onNext() },
-            contentAlignment = Alignment.Center
-        ) {
-            GlyphIcon(Glyph.Next, p.text, Modifier.size(22.dp))
-        }
-    }
-}
-
-/** Content of the Dynamic Island style mini player (everything sits on a black pill). */
-@Composable
-private fun RowScope.IslandContent(
-    song: Song,
-    isPlaying: Boolean,
-    isFav: Boolean,
-    p: Palette,
-    onToggle: () -> Unit,
-    onNext: () -> Unit,
-    onFav: () -> Unit
-) {
-    Box(
-        Modifier.size(38.dp).clip(CircleShape).clickable { onNext() },
-        contentAlignment = Alignment.Center
-    ) {
-        GlyphIcon(Glyph.Next, Color.White, Modifier.size(21.dp))
-    }
-    Box(
-        Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.14f)).clickable { onToggle() },
-        contentAlignment = Alignment.Center
-    ) {
-        GlyphIcon(if (isPlaying) Glyph.Pause else Glyph.Play, Color.White, Modifier.size(19.dp))
-    }
-    Box(
-        Modifier.size(36.dp).clip(CircleShape).clickable { onFav() },
-        contentAlignment = Alignment.Center
-    ) {
-        GlyphIcon(
-            if (isFav) Glyph.Heart else Glyph.HeartOutline,
-            if (isFav) p.accent else Color.White.copy(alpha = 0.7f),
-            Modifier.size(18.dp)
-        )
-    }
-    Spacer(Modifier.width(6.dp))
-    SoundBars(isPlaying, p.accent)
-    Spacer(Modifier.weight(1f))
-    Column(Modifier.weight(1f)) {
-        Text(
-            song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White
-        )
-        Text(
-            song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f)
-        )
-    }
-    Spacer(Modifier.width(8.dp))
-    Cover(song, Modifier.size(42.dp), 0.dp, p, 300, round = true)
-}
-
-/** Little animated equalizer, like the live activity bars on the iPhone. */
-@Composable
-private fun SoundBars(playing: Boolean, color: Color) {
-    val t = rememberInfiniteTransition(label = "bars")
-    val periods = intArrayOf(520, 680, 450, 610)
-    val h = periods.mapIndexed { i, ms ->
-        t.animateFloat(
-            initialValue = 0.25f + 0.1f * i,
-            targetValue = 1f - 0.12f * i,
-            animationSpec = infiniteRepeatable(tween(ms, easing = LinearEasing), RepeatMode.Reverse),
-            label = "bar$i"
-        )
-    }
-    val rest by animateFloatAsState(if (playing) 1f else 0f, tween(300), label = "barsRest")
-    Row(
-        Modifier.height(18.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.5.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        h.forEach { st ->
-            Box(
-                Modifier
-                    .width(3.dp)
-                    .height(18.dp)
-                    .graphicsLayer {
-                        val f = 0.22f + (st.value - 0.22f) * rest
-                        scaleY = f.coerceAtLeast(0.18f)
-                    }
-                    .background(color, RoundedCornerShape(2.dp))
-            )
-        }
-    }
-}
-
-/**
  * iOS style floating tab bar (liquid glass).
  *  - A glass capsule with a bigger profile photo.
  *  - Hold the bar: the selected spot lifts into a glass lens that wraps the icon,
@@ -390,13 +71,8 @@ fun GlassTabBar(
     p: Palette,
     photo: ImageBitmap?,
     profileName: String,
-    classic: Boolean = false,
     navy: Boolean = false   // compact icon-only pill in the theme colour
 ) {
-    if (classic) {
-        ClassicTabBar(modifier, selected, onSelect, p, photo, profileName)
-        return
-    }
     val tabs = listOf(
         "Songs" to Glyph.Note,
         "Albums" to Glyph.Album,
@@ -613,43 +289,6 @@ private fun Modifier.iosGlass(shape: Shape, solid: Color? = null): Modifier =
             shape
         )
 
-@Composable
-private fun ClassicTabBar(
-    modifier: Modifier,
-    selected: Int,
-    onSelect: (Int) -> Unit,
-    p: Palette,
-    photo: ImageBitmap?,
-    profileName: String
-) {
-    val tabs = listOf("Songs" to Glyph.Note, "Albums" to Glyph.Album, "Artists" to Glyph.Artist, "Profile" to Glyph.Artist)
-    Row(
-        modifier.height(BarHeight)
-            .background(Color(0xFF1C1C1E).copy(alpha = 0.96f))
-            .drawBehind { drawLine(Color.White.copy(alpha = 0.14f), androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(size.width, 0f), 1.dp.toPx()) },
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        tabs.forEachIndexed { i, (label, glyph) ->
-            val chosen = selected == i
-            Column(
-                Modifier.weight(1f).fillMaxHeight()
-                    .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { onSelect(i) }
-                    .padding(vertical = 7.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                if (i == 3) {
-                    Avatar(photo, profileName, p, Modifier.size(25.dp).then(if (chosen) Modifier.border(1.5.dp, p.accent, CircleShape) else Modifier), 14.sp)
-                } else {
-                    GlyphIcon(glyph, if (chosen) p.accent else Color(0xFF9A9AA0), Modifier.size(23.dp))
-                }
-                Spacer(Modifier.height(3.dp))
-                Text(label, fontSize = 10.sp, fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Medium, color = if (chosen) p.accent else Color(0xFF9A9AA0), maxLines = 1)
-            }
-        }
-    }
-}
-
 val BarHeight = 64.dp
 /** Total height of the white mini player card, and how much of its bottom the tab bar covers. */
 val MiniCardHeight = 96.dp
@@ -658,7 +297,7 @@ private val BarPad = 6.dp
 
 /** Round glass search button that sits next to the tab bar (like the iOS tab bar). */
 @Composable
-fun SearchButton(active: Boolean, p: Palette, onClick: () -> Unit, classic: Boolean = false, navy: Boolean = false) {
+fun SearchButton(active: Boolean, p: Palette, onClick: () -> Unit, navy: Boolean = false) {
     var pressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         if (pressed) 0.88f else 1f,
@@ -674,8 +313,8 @@ fun SearchButton(active: Boolean, p: Palette, onClick: () -> Unit, classic: Bool
                 scaleX = scale
                 scaleY = scale
             }
-            .then(if (classic) Modifier.background(Color(0xFF1C1C1E).copy(alpha = 0.96f)) else Modifier.iosGlass(CircleShape, if (navy) p.tabBarColor else null))
-            .background(if (active) p.accent.copy(alpha = 0.22f) else Color.Transparent, if (classic) RoundedCornerShape(0.dp) else CircleShape)
+            .iosGlass(CircleShape, if (navy) p.tabBarColor else null)
+            .background(if (active) p.accent.copy(alpha = 0.22f) else Color.Transparent, CircleShape)
             .pointerInput(Unit) {
                 detectTapGestures(
                     onPress = {
@@ -726,7 +365,8 @@ fun TopIsland(
     onSeek: (Long) -> Unit = {},
     onOpenPlayer: () -> Unit = {},
     expanded: Boolean = false,
-    onExpandedChange: (Boolean) -> Unit = {}
+    onExpandedChange: (Boolean) -> Unit = {},
+    onLongPress: () -> Unit = {}
 ) {
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
@@ -734,6 +374,7 @@ fun TopIsland(
     val pillH = islandHeightDp.dp
     val top = ((statusH - pillH) / 2).coerceAtLeast(4.dp)
     val pop = remember { Animatable(1f) }
+    val longPressS by rememberUpdatedState(onLongPress)
 
     // 0f = compact pill, 1f = expanded panel. One spring drives size, corner, shadow and content.
     val t by animateFloatAsState(
@@ -807,6 +448,10 @@ fun TopIsland(
                         onTap = {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onExpandedChange(!expanded)
+                        },
+                        onLongPress = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            longPressS()
                         }
                     )
                 }

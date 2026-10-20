@@ -132,17 +132,11 @@ fun SettingsTab(
             }
         }
         item {
-            SettingsCard("Player style", p) {
-                Segmented(listOf("Classic", "Dynamic Island"), settings.miniStyle, p) { settings.changeMiniStyle(it); NoticeBus.showTest("Player style changed to ${if (it == 1) "Dynamic Island" else "Classic"}.") }
-                Spacer(Modifier.height(10.dp))
+            SettingsCard("Dynamic Island player", p) {
                 Text(
-                    if (settings.miniStyle == 1)
-                        "A fixed-size Dynamic Island at the top. It shows only the cover; tap it to open playback controls (the title shows when it is expanded)."
-                    else
-                        "The classic glass mini player with cover and playback controls.",
+                    "A fixed-size Dynamic Island at the top. Tap it to open playback controls, hold it for the quick menu (favorite, playlist, edit info, share).",
                     fontSize = 13.sp, color = p.secondary
                 )
-                if (settings.miniStyle == 1) {
                     Spacer(Modifier.height(14.dp))
                     Text("Dynamic Island width: ${settings.islandWidth} dp", fontSize = 13.sp, color = p.text)
                     Slider(
@@ -169,7 +163,7 @@ fun SettingsTab(
                         colors = SliderDefaults.colors(thumbColor = p.accent, activeTrackColor = p.accent)
                     )
                     Text("Adjust the width, height and position manually. Your choices are saved automatically.", fontSize = 12.sp, color = p.secondary)
-                }
+                
             }
         }
         item {
@@ -289,19 +283,6 @@ fun SettingsTab(
             }
         }
         item {
-            SettingsCard("Tab bar style", p) {
-                Segmented(listOf("Floating", "Classic"), settings.tabBarStyle, p) { settings.changeTabBarStyle(it) }
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    if (settings.tabBarStyle == 0)
-                        "Floating glass capsule with the current animations."
-                    else
-                        "A solid rectangular bar attached to the bottom edge. It stays visible, has no glass effect, and the mini player docks directly above it. ",
-                    fontSize = 13.sp, color = p.secondary
-                )
-            }
-        }
-        item {
             SettingsCard("Liquid glass opacity", p) {
                 Slider(
                     value = settings.glass,
@@ -316,17 +297,6 @@ fun SettingsTab(
                     "${(settings.glass * 100).toInt()}% · lower is more see-through",
                     fontSize = 13.sp, color = p.secondary
                 )
-            }
-        }
-        item {
-            SettingsCard("Liquid Glass · Classic mode", p) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Opaque player and navigation", fontSize = 15.sp, color = p.text)
-                        Text("Use solid backgrounds instead of transparent glass. Scrolling still hides and reveals the navigation bar.", fontSize = 12.sp, color = p.secondary)
-                    }
-                    Switch(checked = settings.opaqueClassic, onCheckedChange = { settings.changeOpaqueClassic(it) })
-                }
             }
         }
         item {

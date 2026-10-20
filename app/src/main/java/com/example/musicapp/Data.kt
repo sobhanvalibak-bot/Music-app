@@ -134,13 +134,8 @@ class Settings(private val prefs: SharedPreferences) {
     var accent by mutableIntStateOf(prefs.getInt("accent", 0)); private set
     var sort by mutableIntStateOf(prefs.getInt("sort", 0)); private set
     var glass by mutableFloatStateOf(prefs.getFloat("glass", 0.78f)); private set
-    var opaqueClassic by mutableStateOf(prefs.getBoolean("opaque_classic", false)); private set
-    /** 0 = floating glass tabs, 1 = classic full-width dock. */
-    var tabBarStyle by mutableIntStateOf(prefs.getInt("tab_bar_style", 0).coerceIn(0, 1)); private set
     var corners by mutableFloatStateOf(prefs.getFloat("corners", 1f)); private set
     var showDuration by mutableStateOf(prefs.getBoolean("duration", true)); private set
-    /** 0 = classic glass mini player, 1 = the fixed-size Dynamic Island at the top. */
-    var miniStyle by mutableIntStateOf(prefs.getInt("mini_style", 0).coerceIn(0, 1)); private set
     var noticeEnabled by mutableStateOf(prefs.getBoolean("notice_island_enabled", true)); private set
     /** User-adjustable Dynamic Island dimensions in dp. */
     var islandWidth by mutableIntStateOf(prefs.getInt("dynamic_island_width", 250).coerceIn(180, 360)); private set
@@ -160,11 +155,8 @@ class Settings(private val prefs: SharedPreferences) {
     fun changeAccent(v: Int) { accent = v; prefs.edit().putInt("accent", v).apply() }
     fun changeSort(v: Int) { sort = v; prefs.edit().putInt("sort", v).apply() }
     fun changeGlass(v: Float) { glass = v; prefs.edit().putFloat("glass", v).apply() }
-    fun changeOpaqueClassic(v: Boolean) { opaqueClassic = v; prefs.edit().putBoolean("opaque_classic", v).apply() }
-    fun changeTabBarStyle(v: Int) { tabBarStyle = v.coerceIn(0, 1); prefs.edit().putInt("tab_bar_style", tabBarStyle).apply() }
     fun changeCorners(v: Float) { corners = v; prefs.edit().putFloat("corners", v).apply() }
     fun changeShowDuration(v: Boolean) { showDuration = v; prefs.edit().putBoolean("duration", v).apply() }
-    fun changeMiniStyle(v: Int) { miniStyle = v.coerceIn(0, 1); prefs.edit().putInt("mini_style", miniStyle).apply() }
     fun changeNoticeEnabled(v: Boolean) { noticeEnabled = v; prefs.edit().putBoolean("notice_island_enabled", v).apply() }
     fun changeIslandWidth(v: Int) { islandWidth = v.coerceIn(180, 360); prefs.edit().putInt("dynamic_island_width", islandWidth).apply() }
     fun changeIslandHeight(v: Int) { islandHeight = v.coerceIn(30, 64); prefs.edit().putInt("dynamic_island_height", islandHeight).apply() }

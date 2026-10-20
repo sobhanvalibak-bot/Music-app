@@ -5,6 +5,7 @@ package com.example.musicapp
 import android.Manifest
 import android.app.Activity
 import android.content.ComponentName
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
@@ -17,6 +18,11 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.graphicsLayer
@@ -80,7 +86,7 @@ fun MusicApp(
         label = "playerCoverTint"
     )
     val playerPalette = remember(p, animatedPlayerTint) {
-        Palette(p.dark, p.accent, settings.glass, p.corner, animatedPlayerTint, p.opaqueClassic)
+        Palette(p.dark, p.accent, settings.glass, p.corner, animatedPlayerTint)
     }
 
     var granted by remember {
@@ -184,7 +190,9 @@ fun MusicApp(
 
     var showPlayer by remember { mutableStateOf(false) }
     var islandExpanded by remember { mutableStateOf(false) }
-    LaunchedEffect(showPlayer) { if (showPlayer) islandExpanded = false }
+    // quick menu that opens when the Dynamic Island is held
+    var islandMenu by remember { mutableStateOf(false) }
+    LaunchedEffect(showPlayer) { if (showPlayer) { islandExpanded = false; islandMenu = false } }
     var artistPage by remember { mutableStateOf<String?>(null) }
     var albumPage by remember { mutableStateOf<List<Song>?>(null) }
     var barsVisible by remember { mutableStateOf(true) }
@@ -195,6 +203,7 @@ fun MusicApp(
     BackHandler(enabled = tab == 3 && sub != Sub.None) { sub = Sub.None }
     BackHandler(enabled = artistPage != null) { artistPage = null }
     BackHandler(enabled = showPlayer) { showPlayer = false }
+    BackHandler(enabled = islandMenu) { islandMenu = false }
 
     // Scrolling content down hides the bars, scrolling back up brings them back.
     val barsScroll = remember {
@@ -219,18 +228,10 @@ fun MusicApp(
 
     // Scrolling down: only the tab bar (and search button) fades out, and the mini player glides
     // down into the place the tab bar had. The mini player itself never fades.
-    val classicTabs = settings.tabBarStyle == 1
-    // white card mini player half hidden behind a dark tab bar
-    val cardStyle = settings.miniStyle == 0 && !classicTabs
     val tabHide by animateFloatAsState(
-        if (classicTabs || barsShown) 0f else 1f,
+        if (barsShown) 0f else 1f,
         spring(dampingRatio = 0.85f, stiffness = 380f),
         label = "tabHide"
-    )
-    val miniDock by animateFloatAsState(
-        if (classicTabs || barsShown) 0f else 1f,
-        spring(dampingRatio = 0.78f, stiffness = 300f),
-        label = "miniDock"
     )
     // while typing in search the keyboard needs the space: everything slides away
     val imeHide by animateFloatAsState(
@@ -239,7 +240,6 @@ fun MusicApp(
         label = "imeHide"
     )
     var tabRowH by remember { mutableIntStateOf(0) }
-    var miniH by remember { mutableIntStateOf(0) }
 
     if (!granted) {
         Column(
@@ -457,12 +457,17 @@ fun MusicApp(
 
     val topPad = WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding() + 8.dp
     val bottomPad = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() +
-        (if (current != null) 164.dp else 104.dp)
+        104.dp
     val sortSubtitle = SortSubtitles[settings.sort.coerceIn(0, 2)]
     val showDuration = settings.showDuration
 
+    // while the island menu is open the app behind it is blurred (Android 12+), like iOS
+    val menuOpen = islandMenu && current != null && !showPlayer
+    val menuBlur by animateDpAsState(if (menuOpen) 18.dp else 0.dp, tween(260), label = "menuBlur")
+    val blurMod = if (menuBlur > 0.dp) Modifier.blur(menuBlur) else Modifier
+
     Box(Modifier.fillMaxSize().nestedScroll(barsScroll)) {
-        Crossfade(targetState = tab, label = "tabs") { t ->
+        Crossfade(targetState = tab, modifier = blurMod, label = "tabs") { t ->
             if (t == 3) {
                 when (val s = sub) {
                     is Sub.None -> ProfileTab(
@@ -638,64 +643,25 @@ fun MusicApp(
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
-                .then(if (classicTabs) Modifier.fillMaxWidth().background(p.card) else Modifier)
+                .then(blurMod)
                 .navigationBarsPadding()
-                .padding(bottom = if (classicTabs) 0.dp else 8.dp),
-            verticalArrangement = Arrangement.spacedBy(if (classicTabs) 0.dp else 8.dp)
+                .padding(bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            current?.takeIf { settings.miniStyle == 0 }?.let { song ->
-                Box(
-                    Modifier
-                        // normally behind the tab bar (card look); above it once the tab bar is hidden
-                        .zIndex(if (cardStyle && miniDock < 0.5f) 0f else 1f)
-                        .onSizeChanged { miniH = it.height }
-                        .graphicsLayer {
-                            // centre of the mini player moves onto the centre of the tab row
-                            val toTabs = 8.dp.toPx() + (miniH + tabRowH) / 2f
-                            // card look: sink the card so the tab bar covers its bottom part
-                            val sink = if (cardStyle) (MiniCardHidden + 8.dp).toPx() * (1f - miniDock) else 0f
-                            translationY = miniDock * toTabs + sink + imeHide * (size.height + 200.dp.toPx())
-                            alpha = 1f
-                        }
-                ) {
-                    MiniPlayer(
-                        song = song,
-                        isPlaying = isPlaying,
-                        isFav = favSet.contains(song.id),
-                        p = playerPalette,
-                        onOpen = { showPlayer = true },
-                        onToggle = {
-                            controller?.let { if (it.isPlaying) it.pause() else it.play() }
-                        },
-                        onNext = {
-                            controller?.let { if (it.hasNextMediaItem()) it.seekToNextMediaItem() }
-                        },
-                        onPrev = {
-                            controller?.let {
-                                if (it.hasPreviousMediaItem()) it.seekToPreviousMediaItem() else it.seekTo(0)
-                            }
-                        },
-                        canNext = { controller?.hasNextMediaItem() == true },
-                        onFav = { profile.toggleFavorite(song.id) },
-                        style = settings.miniStyle,
-                        flatDock = classicTabs
-                    )
-                }
-            }
-            val tabsHidden = !classicTabs && !barsShown
+            val tabsHidden = !barsShown
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .then(if (classicTabs) Modifier else Modifier.padding(horizontal = 14.dp))
+                    .padding(horizontal = 14.dp)
                     .onSizeChanged { tabRowH = it.height }
-                    .then(if (classicTabs) Modifier else Modifier.graphicsLayer {
-                        // Floating mode fades away on scroll; classic mode stays fixed and visible.
+                    .graphicsLayer {
+                        // the floating tab bar fades away when you scroll down
                         alpha = (1f - tabHide) * (1f - imeHide)
                         val sc = 1f - 0.05f * tabHide
                         scaleX = sc
                         scaleY = sc
                         translationY = imeHide * (size.height + 120.dp.toPx())
-                    })
+                    }
                     // a faded tab bar must not take touches
                     .pointerInput(tabsHidden) {
                         if (tabsHidden) {
@@ -707,12 +673,11 @@ fun MusicApp(
                             }
                         }
                     },
-                horizontalArrangement = if (cardStyle) Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally) else Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 GlassTabBar(
-                    // card look: a compact pill, not stretched over the whole width
-                    modifier = if (cardStyle) Modifier.weight(1f, fill = false).widthIn(max = 280.dp) else Modifier.weight(1f),
+                    modifier = Modifier.weight(1f),
                     selected = if (searching) -1 else tab,
                     onSelect = {
                         searching = false
@@ -723,9 +688,7 @@ fun MusicApp(
                     },
                     p = p,
                     photo = profile.photo,
-                    profileName = profile.name,
-                    classic = classicTabs,
-                    navy = cardStyle
+                    profileName = profile.name
                 )
                 SearchButton(
                     active = searching,
@@ -733,15 +696,13 @@ fun MusicApp(
                     onClick = {
                         barsVisible = true
                         searching = true
-                    },
-                    classic = classicTabs,
-                    navy = cardStyle
+                    }
                 )
             }
         }
 
         // Touch anywhere outside the expanded Dynamic Island: it shrinks back.
-        if (islandExpanded && settings.miniStyle == 1 && !showPlayer && current != null) {
+        if (islandExpanded && !showPlayer && current != null) {
             Box(
                 Modifier.fillMaxSize().zIndex(1.5f)
                     .pointerInput(Unit) { detectTapGestures { islandExpanded = false } }
@@ -780,7 +741,7 @@ fun MusicApp(
                     )
                 }
             }
-            if (settings.miniStyle == 1) {
+            if (current != null) {
                 current?.let { song ->
                     AnimatedVisibility(visible = !showPlayer, enter = fadeIn(), exit = fadeOut()) {
                         TopIsland(
@@ -806,7 +767,73 @@ fun MusicApp(
                             },
                             onOpenPlayer = { showPlayer = true },
                             expanded = islandExpanded,
-                            onExpandedChange = { islandExpanded = it }
+                            onExpandedChange = { islandExpanded = it },
+                            onLongPress = { islandExpanded = false; islandMenu = true }
+                        )
+                    }
+                }
+            }
+        }
+
+        // Hold the Dynamic Island: iOS style quick menu under it, app behind it blurred.
+        AnimatedVisibility(
+            visible = menuOpen,
+            modifier = Modifier.fillMaxSize().zIndex(3f),
+            enter = fadeIn(tween(160)),
+            exit = fadeOut(tween(120))
+        ) {
+            val menuSong = current
+            Box(
+                Modifier.fillMaxSize()
+                    .background(Color.Black.copy(alpha = if (p.dark) 0.28f else 0.10f))
+                    .pointerInput(Unit) { detectTapGestures { islandMenu = false } }
+            ) {
+                if (menuSong != null) {
+                    val menuTop = ((WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding() - settings.islandHeight.dp) / 2)
+                        .coerceAtLeast(4.dp) + settings.islandOffsetY.dp + settings.islandHeight.dp + 12.dp
+                    val isFavNow = favSet.contains(menuSong.id)
+                    AnimatedVisibility(
+                        visible = menuOpen,
+                        modifier = Modifier.align(Alignment.TopCenter).padding(top = menuTop),
+                        enter = fadeIn(tween(160)) + scaleIn(
+                            spring(dampingRatio = 0.72f, stiffness = 420f),
+                            initialScale = 0.82f,
+                            transformOrigin = TransformOrigin(0.5f, 0f)
+                        ),
+                        exit = fadeOut(tween(100)) + scaleOut(
+                            tween(120), targetScale = 0.9f,
+                            transformOrigin = TransformOrigin(0.5f, 0f)
+                        )
+                    ) {
+                        IslandContextMenu(
+                            p = p,
+                            groups = listOf(
+                                listOf(
+                                    MenuAction(
+                                        if (isFavNow) "Remove favorite" else "Favorite",
+                                        if (isFavNow) Glyph.Heart else Glyph.HeartOutline
+                                    ) { profile.toggleFavorite(menuSong.id); islandMenu = false },
+                                    MenuAction("Add to playlist", Glyph.PlusCircle) { addTarget = menuSong; islandMenu = false }
+                                ),
+                                listOf(
+                                    MenuAction("Edit info", Glyph.Edit) { editTarget = menuSong; islandMenu = false },
+                                    MenuAction("Share", Glyph.Share) {
+                                        islandMenu = false
+                                        try {
+                                            val shareText = "${menuSong.title} — ${menuSong.artist}" +
+                                                if (menuSong.album.isNotBlank()) "\n${menuSong.album}" else ""
+                                            val send = Intent(Intent.ACTION_SEND).apply {
+                                                type = "text/plain"
+                                                putExtra(Intent.EXTRA_SUBJECT, menuSong.title)
+                                                putExtra(Intent.EXTRA_TEXT, shareText)
+                                            }
+                                            context.startActivity(Intent.createChooser(send, "Share song"))
+                                        } catch (_: Exception) {
+                                            Toast.makeText(context, "Unable to share this song", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                )
+                            )
                         )
                     }
                 }

@@ -52,8 +52,8 @@ class MainActivity : ComponentActivity() {
                 else -> isSystemInDarkTheme()
             }
             val accent = AccentColors[settings.accent.coerceIn(0, AccentColors.lastIndex)]
-            val p = remember(dark, accent, settings.glass, settings.corners, tintNow, settings.opaqueClassic) {
-                Palette(dark, accent, settings.glass, settings.corners, tintNow, settings.opaqueClassic)
+            val p = remember(dark, accent, settings.glass, settings.corners, tintNow) {
+                Palette(dark, accent, settings.glass, settings.corners, tintNow)
             }
 
             DisposableEffect(dark) {

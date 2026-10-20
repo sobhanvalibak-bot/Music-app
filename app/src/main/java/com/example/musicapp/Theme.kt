@@ -60,8 +60,7 @@ class Palette(
     baseAccent: Color,
     glass: Float,
     val corner: Float,
-    tint: Color? = null,
-    val opaqueClassic: Boolean = false
+    tint: Color? = null
 ) {
     val tinted = tint != null
 
@@ -84,10 +83,10 @@ class Palette(
     val text: Color = if (dark) Color.White else Color.Black
     val secondary: Color = if (tinted) Color.White.copy(alpha = 0.62f) else Color(0xFF8E8E93)
     val glassTop: Color =
-        if (opaqueClassic) card else if (tinted) tone(0.7f, 0.38f).copy(alpha = glass)
+        if (tinted) tone(0.7f, 0.38f).copy(alpha = glass)
         else if (dark) Color(0xFF3A3A3C).copy(alpha = glass) else Color.White.copy(alpha = glass)
     val glassBottom: Color =
-        if (opaqueClassic) card else (if (tinted) tone(0.8f, 0.22f) else if (dark) Color(0xFF1C1C1E) else Color(0xFFF7F7FA))
+        (if (tinted) tone(0.8f, 0.22f) else if (dark) Color(0xFF1C1C1E) else Color(0xFFF7F7FA))
             .copy(alpha = (glass - 0.14f).coerceAtLeast(0.2f))
     val selectedPill: Color = if (dark) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.07f)
     val coverTop: Color = if (tinted) tone(0.6f, 0.40f) else if (dark) Color(0xFF3A3A3C) else Color(0xFFE5E5EA)
