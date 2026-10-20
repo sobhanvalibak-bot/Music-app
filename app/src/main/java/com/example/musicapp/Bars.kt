@@ -619,11 +619,13 @@ fun TopIsland(
     onFav: () -> Unit,
     onShuffle: () -> Unit,
     onRepeat: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    islandWidthDp: Int = 250,
+    islandHeightDp: Int = 36
 ) {
     val density = LocalDensity.current
     val statusH = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
-    val pillH = 36.dp
+    val pillH = islandHeightDp.dp
     val top = ((statusH - pillH) / 2).coerceAtLeast(4.dp)
     val shape = RoundedCornerShape(50)
     var menuOpen by remember { mutableStateOf(false) }
@@ -636,8 +638,8 @@ fun TopIsland(
         Row(
             Modifier
                 .graphicsLayer { scaleX = pop.value; scaleY = pop.value }
-                .widthIn(max = 340.dp)
-                .fillMaxWidth(0.90f)
+                .widthIn(min = 180.dp, max = 360.dp)
+                .width(islandWidthDp.dp)
                 .height(pillH)
                 .clip(shape)
                 .background(Color.Black)
@@ -647,7 +649,7 @@ fun TopIsland(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Start
         ) {
-            Cover(song, Modifier.size(27.dp), 0.dp, p, 200, round = true)
+            Cover(song, Modifier.size((islandHeightDp - 9).coerceAtLeast(20).dp), 0.dp, p, 200, round = true)
             Spacer(Modifier.weight(1f))
             Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
                 repeat(4) { i ->

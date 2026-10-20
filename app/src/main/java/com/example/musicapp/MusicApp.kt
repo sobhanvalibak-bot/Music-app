@@ -733,7 +733,9 @@ fun MusicApp(
                         onPrev = { controller?.let { if (it.hasPreviousMediaItem()) it.seekToPreviousMediaItem() else it.seekTo(0) } },
                         onFav = { profile.toggleFavorite(song.id) },
                         onShuffle = { controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } },
-                        onRepeat = { controller?.let { it.repeatMode = when (it.repeatMode) { Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL; Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE; else -> Player.REPEAT_MODE_OFF } } }
+                        onRepeat = { controller?.let { it.repeatMode = when (it.repeatMode) { Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL; Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE; else -> Player.REPEAT_MODE_OFF } } },
+                        islandWidthDp = settings.islandWidth,
+                        islandHeightDp = settings.islandHeight
                     )
                 }
             }

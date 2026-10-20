@@ -140,6 +140,26 @@ fun SettingsTab(
                         "The classic glass mini player with cover and playback controls.",
                     fontSize = 13.sp, color = p.secondary
                 )
+                if (settings.miniStyle == 1) {
+                    Spacer(Modifier.height(14.dp))
+                    Text("Dynamic Island width: ${settings.islandWidth} dp", fontSize = 13.sp, color = p.text)
+                    Slider(
+                        value = settings.islandWidth.toFloat(),
+                        onValueChange = { settings.changeIslandWidth(it.toInt()); },
+                        valueRange = 180f..360f,
+                        steps = 17,
+                        colors = SliderDefaults.colors(thumbColor = p.accent, activeTrackColor = p.accent)
+                    )
+                    Text("Dynamic Island height: ${settings.islandHeight} dp", fontSize = 13.sp, color = p.text)
+                    Slider(
+                        value = settings.islandHeight.toFloat(),
+                        onValueChange = { settings.changeIslandHeight(it.toInt()) },
+                        valueRange = 30f..64f,
+                        steps = 16,
+                        colors = SliderDefaults.colors(thumbColor = p.accent, activeTrackColor = p.accent)
+                    )
+                    Text("Adjust the width and height manually. Your choices are saved automatically.", fontSize = 12.sp, color = p.secondary)
+                }
             }
         }
         item {
