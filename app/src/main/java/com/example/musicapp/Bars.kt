@@ -323,8 +323,8 @@ fun GlassTabBar(
         "Profile" to Glyph.Artist
     )
     val count = tabs.size
-    val barShape = RoundedCornerShape(40.dp)
-    val lensShape = RoundedCornerShape(34.dp)
+    val barShape = RoundedCornerShape(32.dp)
+    val lensShape = RoundedCornerShape(28.dp)
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
     val padPx = with(density) { BarPad.toPx() }
@@ -444,7 +444,7 @@ fun GlassTabBar(
                                 drawCircle(
                                     brush = Brush.radialGradient(
                                         listOf(
-                                            p.accent.copy(alpha = 0.40f * lift),
+                                            p.accent.copy(alpha = 0.16f * lift),
                                             Color.Transparent
                                         ),
                                         center = center,
@@ -457,12 +457,8 @@ fun GlassTabBar(
                         }
                         .clip(lensShape)
                         .background(
-                            Brush.verticalGradient(
-                                listOf(
-                                    Color.White.copy(alpha = (if (p.dark) 0.20f else 0.55f) + 0.20f * lift),
-                                    p.accent.copy(alpha = 0.10f + 0.10f * lift)
-                                )
-                            )
+                            if (p.dark) Color.White.copy(alpha = 0.16f + 0.12f * lift)
+                            else Color.Black.copy(alpha = 0.07f + 0.05f * lift)
                         )
                         .border(
                             1.2.dp,
@@ -491,7 +487,7 @@ fun GlassTabBar(
                 ) {
                     Box(
                         Modifier
-                            .size(34.dp)
+                            .size(28.dp)
                             .graphicsLayer {
                                 // dock-style magnification: the closer to the lens, the bigger
                                 val centre = i * itemW
@@ -514,13 +510,13 @@ fun GlassTabBar(
                                 14.sp
                             )
                         } else {
-                            GlyphIcon(glyph, tint, Modifier.size(26.dp))
+                            GlyphIcon(glyph, tint, Modifier.size(24.dp))
                         }
                     }
-                    Spacer(Modifier.height(3.dp))
+                    Spacer(Modifier.height(2.dp))
                     Text(
-                        label, fontSize = 10.5.sp,
-                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                        label, fontSize = 10.sp,
+                        fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium,
                         color = tint, maxLines = 1
                     )
                 }
@@ -529,7 +525,7 @@ fun GlassTabBar(
     }
 }
 
-val BarHeight = 72.dp
+val BarHeight = 64.dp
 private val BarPad = 6.dp
 
 /** Round glass search button that sits next to the tab bar (like the iOS tab bar). */
@@ -564,7 +560,7 @@ fun SearchButton(active: Boolean, p: Palette, onClick: () -> Unit) {
             },
         contentAlignment = Alignment.Center
     ) {
-        GlyphIcon(Glyph.Search, tint, Modifier.size(26.dp))
+        GlyphIcon(Glyph.Search, tint, Modifier.size(24.dp))
     }
 }
 
