@@ -21,6 +21,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -348,7 +349,6 @@ fun GlassTabBar(
         "Songs" to Glyph.Note,
         "Albums" to Glyph.Album,
         "Artists" to Glyph.Artist,
-        "Reels" to Glyph.Album,
         "Profile" to Glyph.Artist
     )
     val count = tabs.size
@@ -518,7 +518,7 @@ fun GlassTabBar(
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        if (i == 4) {
+                        if (i == 3) {
                             // Profile tab: the user's own photo
                             Avatar(
                                 photo, profileName, p,
@@ -564,7 +564,7 @@ private fun ClassicTabBar(
     photo: ImageBitmap?,
     profileName: String
 ) {
-    val tabs = listOf("Songs" to Glyph.Note, "Albums" to Glyph.Album, "Artists" to Glyph.Artist, "Reels" to Glyph.Album, "Profile" to Glyph.Artist)
+    val tabs = listOf("Songs" to Glyph.Note, "Albums" to Glyph.Album, "Artists" to Glyph.Artist, "Profile" to Glyph.Artist)
     Row(
         modifier.height(BarHeight)
             .background(Color(0xFF1C1C1E).copy(alpha = 0.96f))
@@ -580,7 +580,7 @@ private fun ClassicTabBar(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                if (i == 4) {
+                if (i == 3) {
                     Avatar(photo, profileName, p, Modifier.size(25.dp).then(if (chosen) Modifier.border(1.5.dp, p.accent, CircleShape) else Modifier), 14.sp)
                 } else {
                     GlyphIcon(glyph, if (chosen) p.accent else Color(0xFF9A9AA0), Modifier.size(23.dp))
@@ -661,7 +661,9 @@ fun TopIsland(
     islandWidthDp: Int = 250,
     islandHeightDp: Int = 36,
     position: Long = 0L,
-    reserveTop: Boolean = true
+    reserveTop: Boolean = true,
+    onSeek: (Long) -> Unit = {},
+    onOpenPlayer: () -> Unit = {}
 ) {
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
@@ -796,28 +798,73 @@ fun TopIsland(
                         }
                         Spacer(Modifier.width(8.dp))
                         IslandWave(isPlaying, wavePhase, Color.White, 1f)
+                        Spacer(Modifier.width(10.dp))
+                        // opens the full player
+                        Box(
+                            Modifier.size(34.dp).clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.16f))
+                                .clickable {
+                                    expanded = false
+                                    onOpenPlayer()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            GlyphIcon(Glyph.ChevronDown, Color.White, Modifier.size(20.dp).graphicsLayer { rotationZ = 180f })
+                        }
                     }
 
-                    // progress
+                    // progress: drag or tap to change the time of the song
                     val dur = song.durationMs
-                    val frac = if (dur > 0) (position.toFloat() / dur).coerceIn(0f, 1f) else 0f
+                    var dragFrac by remember { mutableStateOf<Float?>(null) }
+                    val liveFrac = if (dur > 0) (position.toFloat() / dur).coerceIn(0f, 1f) else 0f
+                    val frac = dragFrac ?: liveFrac
+                    val shownMs = if (dragFrac != null) (frac * dur).toLong() else position
+                    val seekS by rememberUpdatedState(onSeek)
                     Column {
                         Box(
-                            Modifier.fillMaxWidth().height(4.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(Color.White.copy(alpha = 0.18f))
+                            Modifier.fillMaxWidth().height(24.dp)
+                                .pointerInput(dur) {
+                                    detectTapGestures { o ->
+                                        if (dur > 0 && size.width > 0) {
+                                            seekS((o.x / size.width).coerceIn(0f, 1f).times(dur).toLong())
+                                        }
+                                    }
+                                }
+                                .pointerInput(dur) {
+                                    detectHorizontalDragGestures(
+                                        onDragStart = { o ->
+                                            if (size.width > 0) dragFrac = (o.x / size.width).coerceIn(0f, 1f)
+                                        },
+                                        onHorizontalDrag = { change, _ ->
+                                            change.consume()
+                                            if (size.width > 0) dragFrac = (change.position.x / size.width).coerceIn(0f, 1f)
+                                        },
+                                        onDragEnd = {
+                                            dragFrac?.let { if (dur > 0) seekS((it * dur).toLong()) }
+                                            dragFrac = null
+                                        },
+                                        onDragCancel = { dragFrac = null }
+                                    )
+                                },
+                            contentAlignment = Alignment.CenterStart
                         ) {
+                            val barH by animateDpAsState(if (dragFrac != null) 8.dp else 4.dp, tween(150), label = "islandBarH")
                             Box(
-                                Modifier.fillMaxHeight().fillMaxWidth(frac)
+                                Modifier.fillMaxWidth().height(barH)
                                     .clip(RoundedCornerShape(50))
-                                    .background(Color.White)
-                            )
+                                    .background(Color.White.copy(alpha = 0.18f))
+                            ) {
+                                Box(
+                                    Modifier.fillMaxHeight().fillMaxWidth(frac)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(Color.White)
+                                )
+                            }
                         }
-                        Spacer(Modifier.height(4.dp))
                         Row(Modifier.fillMaxWidth()) {
-                            Text(formatTime(position), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                            Text(formatTime(shownMs), color = Color.White.copy(alpha = if (dragFrac != null) 1f else 0.5f), fontSize = 10.sp)
                             Spacer(Modifier.weight(1f))
-                            Text(formatTime(dur), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+                            Text("-" + formatTime((dur - shownMs).coerceAtLeast(0L)), color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                         }
                     }
 

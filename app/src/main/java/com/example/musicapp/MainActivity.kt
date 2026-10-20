@@ -83,6 +83,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         hideStatusBar()
+        // "Notification access" may have just been switched on, or the binding was lost
+        rebindNoticeListener(this)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

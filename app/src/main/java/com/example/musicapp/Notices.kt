@@ -63,6 +63,11 @@ object NoticeBus {
         private set
     private var testCounter = 0
 
+    /** True while Android has the notification listener bound to this app. */
+    var listenerConnected by mutableStateOf(false)
+        private set
+    fun markListenerConnected(v: Boolean) { listenerConnected = v }
+
     fun publish(notice: Notice) { current = notice }
     fun dismiss() { current = null }
 
@@ -83,11 +88,33 @@ object NoticeBus {
 class NoticeListenerService : NotificationListenerService() {
     private val main = Handler(Looper.getMainLooper())
 
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        main.post { NoticeBus.markListenerConnected(true) }
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        main.post { NoticeBus.markListenerConnected(false) }
+        // Android (and phone makers' battery savers) can drop the binding: ask to be bound again
+        try {
+            requestRebind(android.content.ComponentName(this, NoticeListenerService::class.java))
+        } catch (_: Exception) {
+        }
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (sbn.packageName == packageName) return
         val n = sbn.notification ?: return
-        // skip the ongoing ones (music, downloads, calls...), group summaries and silent system stuff
-        if (n.flags and Notification.FLAG_ONGOING_EVENT != 0) return
+        val chatLike = n.category == Notification.CATEGORY_MESSAGE ||
+            n.category == Notification.CATEGORY_EMAIL ||
+            n.category == Notification.CATEGORY_SOCIAL ||
+            n.category == Notification.CATEGORY_CALL ||
+            n.category == Notification.CATEGORY_REMINDER ||
+            n.category == Notification.CATEGORY_ALARM
+        // skip the ongoing ones (music, downloads...), group summaries and silent system stuff.
+        // Messages, mail, calls and reminders are always shown, even if the app marks them "ongoing".
+        if (!chatLike && n.flags and Notification.FLAG_ONGOING_EVENT != 0) return
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
         if (n.category == Notification.CATEGORY_TRANSPORT ||
             n.category == Notification.CATEGORY_PROGRESS ||
@@ -126,7 +153,8 @@ class NoticeListenerService : NotificationListenerService() {
                 n.smallIcon?.loadDrawable(this)?.toImageBitmap(128)
             } catch (_: Exception) { null }
         }
-        val notice = Notice(sbn.key, appName, icon, title, text)
+        // unique per post, so a second message from the same app restarts the island and its timer
+        val notice = Notice("${sbn.key}|${sbn.postTime}", appName, icon, title, text)
         main.post { NoticeBus.publish(notice) }
     }
 
@@ -151,15 +179,51 @@ private fun Drawable.toImageBitmap(size: Int): ImageBitmap {
 fun isNoticeAccessEnabled(context: Context): Boolean =
     NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
 
-/** After an update/reinstall Android may leave the listener unbound: ask it to reconnect. */
-fun rebindNoticeListener(context: Context) {
+/**
+ * After an update/reinstall (or when a battery saver killed the app) Android can leave the listener
+ * unbound even though "Notification access" is on. requestRebind() alone is often ignored, so
+ * [force] also switches the component off and on, which makes Android bind it again.
+ */
+fun rebindNoticeListener(context: Context, force: Boolean = false) {
     try {
-        if (isNoticeAccessEnabled(context)) {
-            NotificationListenerService.requestRebind(
-                android.content.ComponentName(context, NoticeListenerService::class.java)
+        if (!isNoticeAccessEnabled(context)) return
+        val cn = android.content.ComponentName(context, NoticeListenerService::class.java)
+        if (force || !NoticeBus.listenerConnected) {
+            val pm = context.packageManager
+            pm.setComponentEnabledSetting(
+                cn, android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                android.content.pm.PackageManager.DONT_KILL_APP
+            )
+            pm.setComponentEnabledSetting(
+                cn, android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                android.content.pm.PackageManager.DONT_KILL_APP
             )
         }
+        NotificationListenerService.requestRebind(cn)
     } catch (_: Exception) {
+    }
+}
+
+/** Asks Android not to put the app to sleep, otherwise phones like Xiaomi stop the listener. */
+fun requestNoBatteryLimit(context: Context) {
+    try {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        val intent = if (!pm.isIgnoringBatteryOptimizations(context.packageName)) {
+            android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                .setData(android.net.Uri.parse("package:${context.packageName}"))
+        } else {
+            android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        }
+        context.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    } catch (_: Exception) {
+        try {
+            context.startActivity(
+                android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(android.net.Uri.parse("package:${context.packageName}"))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (_: Exception) {
+        }
     }
 }
 

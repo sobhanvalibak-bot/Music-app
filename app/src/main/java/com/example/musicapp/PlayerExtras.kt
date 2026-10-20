@@ -3,6 +3,24 @@
 package com.example.musicapp
 
 import android.os.SystemClock
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.runtime.getValue
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -43,7 +61,6 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -96,10 +113,40 @@ private fun speedLabel(s: Float): String =
 
 // ───────────────────────── Lyrics ─────────────────────────
 
+private fun shiftHue(c: Color, deg: Float): Color {
+    val hsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(c.toArgb(), hsv)
+    hsv[0] = (hsv[0] + deg) % 360f
+    hsv[1] = hsv[1].coerceAtLeast(0.5f)
+    hsv[2] = hsv[2].coerceAtLeast(0.8f)
+    return Color(android.graphics.Color.HSVToColor(hsv))
+}
+
+/** The line being sung: the part already sung is bright, the rest is dim (karaoke wipe). */
+private fun karaokeText(line: LrcLine, nextMs: Long, pos: Long): AnnotatedString {
+    val on = Color.White
+    val off = Color.White.copy(alpha = 0.38f)
+    return buildAnnotatedString {
+        if (line.words.isNotEmpty()) {
+            for (w in line.words) {
+                withStyle(SpanStyle(color = if (pos >= w.timeMs) on else off)) { append(w.text) }
+            }
+        } else {
+            // only line timing: spread the wipe over the length of the line
+            val span = ((nextMs - line.timeMs) * 0.85f).toLong().coerceIn(600L, 8000L)
+            val frac = ((pos - line.timeMs).toFloat() / span).coerceIn(0f, 1f)
+            val n = (line.text.length * frac).toInt().coerceIn(0, line.text.length)
+            withStyle(SpanStyle(color = on)) { append(line.text.substring(0, n)) }
+            withStyle(SpanStyle(color = off)) { append(line.text.substring(n)) }
+        }
+    }
+}
+
 /**
- * Lyrics from the device only: a .lrc saved for this song, lyrics found inside the audio file,
- * or a .lrc the user imports. Timed lyrics follow the song (line by line, or word by word when
- * the .lrc has word timing); tap a line to jump there.
+ * Full-screen lyrics in the Apple Music style: a soft glow in the colours of the cover,
+ * big bold left-aligned lines, the current line bright (filling up as it is sung) and
+ * the other lines dimmer and more blurred the further they are from it. Tap a line to jump there.
+ * Lyrics come from the device only (a saved .lrc, the audio file's tag, or an imported .lrc).
  */
 @Composable
 fun LyricsPanel(
@@ -155,106 +202,200 @@ fun LyricsPanel(
 
     LaunchedEffect(active, lines) {
         if (active >= 0 && !listState.isScrollInProgress) {
-            listState.animateScrollToItem(active, -(listState.layoutInfo.viewportSize.height / 4))
+            listState.animateScrollToItem(active, -(listState.layoutInfo.viewportSize.height / 5))
         }
     }
 
-    Column(
+    // colours of the glow: the cover colour plus a neighbour hue, like the Apple Music background
+    val glowA = p.accent
+    val glowB = remember(p.accent) { shiftHue(p.accent, 45f) }
+    val base = remember(p.accent) { lerp(Color.Black, p.accent, 0.10f) }
+    val drift by rememberInfiniteTransition(label = "lyricGlow").animateFloat(
+        0f, 1f,
+        infiniteRepeatable(tween(9000, easing = LinearEasing), RepeatMode.Reverse),
+        label = "lyricGlowDrift"
+    )
+
+    Box(
         Modifier
             .fillMaxSize()
-            .background(p.bgBrush)
-            .background(Brush.verticalGradient(listOf(p.accent.copy(alpha = 0.22f), Color.Transparent)))
+            .background(base)
+            .drawBehind {
+                val w = size.width
+                val h = size.height
+                drawRect(
+                    Brush.radialGradient(
+                        listOf(glowA.copy(alpha = 0.32f), Color.Transparent),
+                        center = Offset(w * (0.30f + 0.3f * drift), h * 0.10f), radius = w * 0.95f
+                    )
+                )
+                drawRect(
+                    Brush.radialGradient(
+                        listOf(glowA.copy(alpha = 0.80f), Color.Transparent),
+                        center = Offset(w * (0.40f + 0.15f * drift), h * 0.66f), radius = w * 0.80f
+                    )
+                )
+                drawRect(
+                    Brush.radialGradient(
+                        listOf(glowB.copy(alpha = 0.65f), Color.Transparent),
+                        center = Offset(w * (0.80f - 0.2f * drift), h * 0.84f), radius = w * 0.70f
+                    )
+                )
+                // keep the top calm and dark so the title stays readable
+                drawRect(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.35f), Color.Transparent), endY = h * 0.25f))
+            }
             .pointerInput(Unit) { detectTapGestures { } }
-            .windowInsetsPadding(WindowInsets.statusBarsIgnoringVisibility)
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 10.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                Modifier.size(44.dp).clip(CircleShape).clickable { onClose() },
-                contentAlignment = Alignment.Center
-            ) { GlyphIcon(Glyph.ChevronDown, p.text, Modifier.size(24.dp)) }
-            Spacer(Modifier.width(6.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    fontSize = 17.sp, fontWeight = FontWeight.Bold, color = p.text
-                )
-                Text(
-                    song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    fontSize = 13.sp, color = p.secondary
-                )
-            }
-            Box(
-                Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(p.selectedPill)
-                    .clickable { importer.launch("*/*") }
-                    .padding(horizontal = 12.dp, vertical = 7.dp)
-            ) { Text("Import .lrc", fontSize = 13.sp, color = p.text) }
-        }
-
-        if (lines.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                Text(
-                    if (loading) "Looking in the song file…"
-                    else "No lyrics for this song yet.\n\nImport a .lrc file (line or word timing both work). " +
-                        "It is saved on this device and works offline from then on.",
-                    color = p.secondary, fontSize = 15.sp
-                )
-            }
-        } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(top = 24.dp, bottom = 320.dp)
+        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBarsIgnoringVisibility)) {
+            // header: small cover, title + artist, round "+" (import .lrc)
+            Row(
+                Modifier.fillMaxWidth().padding(start = 8.dp, end = 16.dp, top = 10.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                items(lines.size) { i ->
-                    val line = lines[i]
-                    val isActive = i == active
-                    val alpha by animateFloatAsState(
-                        targetValue = when {
-                            !synced -> 0.9f
-                            isActive -> 1f
-                            i < active -> 0.32f
-                            else -> 0.5f
-                        },
-                        animationSpec = tween(300), label = "lyricAlpha"
+                Box(
+                    Modifier.size(40.dp).clip(CircleShape).clickable { onClose() },
+                    contentAlignment = Alignment.Center
+                ) { GlyphIcon(Glyph.ChevronDown, Color.White, Modifier.size(24.dp)) }
+                Spacer(Modifier.width(4.dp))
+                Cover(song, Modifier.size(56.dp), 12.dp, p, px = 200)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White
                     )
-                    val scale by animateFloatAsState(
-                        targetValue = if (isActive || !synced) 1f else 0.93f,
-                        animationSpec = tween(300), label = "lyricScale"
+                    Text(
+                        song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontSize = 15.sp, color = Color.White.copy(alpha = 0.62f)
                     )
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = synced) { onSeek(line.timeMs) }
-                            .padding(horizontal = 28.dp, vertical = 10.dp)
-                            .graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
-                                transformOrigin = TransformOrigin(0f, 0.5f)
-                            }
-                    ) {
-                        if (isActive && line.words.isNotEmpty()) {
-                            val styled = buildAnnotatedString {
-                                for (w in line.words) {
-                                    val reached = positionMs >= w.timeMs
-                                    withStyle(
-                                        SpanStyle(color = if (reached) p.text else p.text.copy(alpha = 0.35f))
-                                    ) { append(w.text) }
-                                }
-                            }
-                            Text(styled, fontSize = 26.sp, fontWeight = FontWeight.Bold, lineHeight = 32.sp)
-                        } else {
-                            Text(
-                                line.text, fontSize = 26.sp, fontWeight = FontWeight.Bold,
-                                lineHeight = 32.sp, color = p.text.copy(alpha = alpha)
+                }
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .border(1.5.dp, Color.White.copy(alpha = 0.85f), CircleShape)
+                        .clickable { importer.launch("*/*") },
+                    contentAlignment = Alignment.Center
+                ) { GlyphIcon(Glyph.Plus, Color.White, Modifier.size(18.dp)) }
+            }
+
+            if (lines.isEmpty()) {
+                Box(Modifier.weight(1f).fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        if (loading) "Looking in the song file…"
+                        else "No lyrics for this song yet.\n\nTap + to import a .lrc file (line or word timing both work). " +
+                            "It is saved on this device and works offline from then on.",
+                        color = Color.White.copy(alpha = 0.7f), fontSize = 16.sp, lineHeight = 22.sp
+                    )
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                        .drawWithContent {
+                            drawContent()
+                            // fade the lines out at the top and bottom edge
+                            drawRect(
+                                Brush.verticalGradient(
+                                    0f to Color.Transparent,
+                                    0.05f to Color.Black,
+                                    0.90f to Color.Black,
+                                    1f to Color.Transparent
+                                ),
+                                blendMode = BlendMode.DstIn
                             )
+                        },
+                    contentPadding = PaddingValues(top = 16.dp, bottom = 280.dp)
+                ) {
+                    items(lines.size) { i ->
+                        val line = lines[i]
+                        val isActive = synced && i == active
+                        val dist = abs(i - active)
+                        val alpha by animateFloatAsState(
+                            targetValue = when {
+                                !synced -> 0.92f
+                                isActive -> 1f
+                                dist == 1 -> 0.50f
+                                dist == 2 -> 0.40f
+                                else -> 0.32f
+                            },
+                            animationSpec = tween(350), label = "lyricAlpha"
+                        )
+                        val blurDp by animateDpAsState(
+                            targetValue = when {
+                                !synced || isActive -> 0.dp
+                                dist == 1 -> 1.5.dp
+                                dist == 2 -> 3.5.dp
+                                else -> 6.dp
+                            },
+                            animationSpec = tween(350), label = "lyricBlur"
+                        )
+                        val scale by animateFloatAsState(
+                            targetValue = if (isActive || !synced) 1f else 0.96f,
+                            animationSpec = tween(350), label = "lyricScale"
+                        )
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    enabled = synced
+                                ) { onSeek(line.timeMs) }
+                                .padding(horizontal = 24.dp, vertical = 12.dp)
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                    transformOrigin = TransformOrigin(0f, 0.5f)
+                                }
+                        ) {
+                            val textMod = if (blurDp > 0.dp) Modifier.blur(blurDp) else Modifier
+                            if (isActive) {
+                                val next = if (i + 1 < lines.size) lines[i + 1].timeMs else line.timeMs + 4000L
+                                Text(
+                                    karaokeText(line, next, positionMs),
+                                    fontSize = 30.sp, fontWeight = FontWeight.Bold, lineHeight = 37.sp,
+                                    modifier = textMod
+                                )
+                            } else {
+                                Text(
+                                    line.text, fontSize = 30.sp, fontWeight = FontWeight.Bold,
+                                    lineHeight = 37.sp, color = Color.White.copy(alpha = alpha),
+                                    modifier = textMod
+                                )
+                            }
                         }
                     }
                 }
+            }
+        }
+
+        // thin progress line at the bottom
+        val frac = if (song.durationMs > 0) (positionMs.toFloat() / song.durationMs).coerceIn(0f, 1f) else 0f
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 22.dp)
+                .height(10.dp)
+        ) {
+            Box(
+                Modifier.align(Alignment.CenterStart).fillMaxWidth().height(3.dp)
+                    .clip(CircleShape).background(Color.White.copy(alpha = 0.25f))
+            )
+            Box(
+                Modifier.align(Alignment.CenterStart).fillMaxWidth(frac).height(3.dp)
+                    .clip(CircleShape).background(Color.White)
+            )
+            Row(Modifier.align(Alignment.CenterStart).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Spacer(Modifier.weight(frac.coerceAtLeast(0.0001f)))
+                Box(Modifier.size(8.dp).clip(CircleShape).background(Color.White))
+                Spacer(Modifier.weight((1f - frac).coerceAtLeast(0.0001f)))
             }
         }
     }

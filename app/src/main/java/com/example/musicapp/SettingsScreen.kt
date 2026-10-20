@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -80,6 +81,7 @@ fun SettingsTab(
     onPickBannerVideo: () -> Unit,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     LazyColumn(contentPadding = PaddingValues(top = topPad, bottom = bottomPad)) {
         item { BackBar("Profile", p, onBack) }
         item { LargeTitle("Settings", "Make it yours", p) }
@@ -164,6 +166,39 @@ fun SettingsTab(
         }
         item {
             SettingsCard("Notification Dynamic Island", p) {
+                val accessOn = isNoticeAccessEnabled(context)
+                val connected = NoticeBus.listenerConnected
+                Text(
+                    when {
+                        !accessOn -> "Status: Notification access is OFF"
+                        connected -> "Status: Connected, notifications will appear"
+                        else -> "Status: Access is on but not connected yet. Tap Reconnect."
+                    },
+                    color = if (accessOn && connected) p.accent else p.secondary,
+                    fontSize = 13.sp, fontWeight = FontWeight.Medium
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = {
+                        try {
+                            context.startActivity(
+                                android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        } catch (_: Exception) {
+                        }
+                    }) { Text("Access", color = p.accent) }
+                    TextButton(onClick = {
+                        rebindNoticeListener(context, force = true)
+                        android.widget.Toast.makeText(context, "Reconnecting…", android.widget.Toast.LENGTH_SHORT).show()
+                    }) { Text("Reconnect", color = p.accent) }
+                    TextButton(onClick = { requestNoBatteryLimit(context) }) { Text("Keep alive", color = p.accent) }
+                }
+                Text(
+                    "The island shows while this app is open. If it stays empty, tap Reconnect, and on Xiaomi/Samsung also set Battery to \"No restrictions\" and allow Autostart.",
+                    fontSize = 12.sp, color = p.secondary
+                )
+                Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Show notifications", color = p.text, fontWeight = FontWeight.Medium)
