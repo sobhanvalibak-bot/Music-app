@@ -56,11 +56,20 @@ fun FullPlayer(
     onArtist: (String) -> Unit,
     albumSongs: List<Song>,
     onPlayAlbumSong: (Int) -> Unit,
-    onEdit: () -> Unit
+    onEdit: () -> Unit,
+    settings: Settings,
+    speed: Float,
+    onSpeed: (Float) -> Unit,
+    audioInfo: AudioInfo?
 ) {
     var showAlbum by remember { mutableStateOf(false) }
-    val showAlbumNow by rememberUpdatedState(showAlbum)
+    var showLyrics by remember { mutableStateOf(false) }
+    var showOptions by remember { mutableStateOf(false) }
+    // swiping down must not close the player while one of the panels is open
+    val showAlbumNow by rememberUpdatedState(showAlbum || showLyrics || showOptions)
     BackHandler(enabled = showAlbum) { showAlbum = false }
+    BackHandler(enabled = showLyrics) { showLyrics = false }
+    BackHandler(enabled = showOptions) { showOptions = false }
 
     var dragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
@@ -258,7 +267,44 @@ fun FullPlayer(
                 }
             }
 
-            Spacer(Modifier.weight(0.6f))
+            Spacer(Modifier.height(16.dp))
+
+            // Lyrics + playback options (speed, sleep timer, crossfade, equalizer, stats)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(p.selectedPill)
+                        .clickable { showLyrics = true }
+                        .padding(horizontal = 18.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    GlyphIcon(Glyph.Note, p.text, Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Lyrics", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = p.text)
+                }
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(p.selectedPill)
+                        .clickable { showOptions = true }
+                        .padding(horizontal = 18.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    GlyphIcon(Glyph.Tune, p.text, Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (kotlin.math.abs(speed - 1f) < 0.01f) "Playback" else "Playback · ${speed}×",
+                        fontSize = 14.sp, fontWeight = FontWeight.Medium, color = p.text
+                    )
+                }
+            }
+
+            Spacer(Modifier.weight(0.5f))
         }
 
         // Album page that slides up over the player
@@ -273,6 +319,36 @@ fun FullPlayer(
                 p = p,
                 onClose = { showAlbum = false },
                 onPlay = onPlayAlbumSong
+            )
+        }
+
+        AnimatedVisibility(
+            visible = showLyrics,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+        ) {
+            LyricsPanel(
+                song = song,
+                positionMs = position,
+                p = p,
+                onClose = { showLyrics = false },
+                onSeek = onSeek
+            )
+        }
+
+        AnimatedVisibility(
+            visible = showOptions,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            PlaybackOptionsPanel(
+                song = song,
+                p = p,
+                settings = settings,
+                speed = speed,
+                onSpeed = onSpeed,
+                info = audioInfo,
+                onClose = { showOptions = false }
             )
         }
     }

@@ -257,6 +257,8 @@ fun EditSongDialog(
                         onlineBusy = true; onlineMessage = "Looking for synchronized lyrics…"
                         scope.launch {
                             lyrics = AutoMusicLookup.lyrics(title.ifBlank { song.title }, artist.ifBlank { song.artist })
+                            // keep a copy on the device so the player shows them offline from now on
+                            if (lyrics.isNotEmpty()) LyricsStore.saveLines(context, song.id, lyrics)
                             showLyrics = true
                             onlineMessage = if (lyrics.isNotEmpty()) "Synced lyrics found (${lyrics.size} lines)." else "No synced lyrics found for this track."
                             onlineBusy = false

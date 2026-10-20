@@ -139,6 +139,10 @@ class Settings(private val prefs: SharedPreferences) {
     var showDuration by mutableStateOf(prefs.getBoolean("duration", true)); private set
     /** 0 = classic glass mini player, 1 = Dynamic Island (black pill) */
     var miniStyle by mutableIntStateOf(prefs.getInt("mini_style", 0)); private set
+    /** Crossfade between songs in seconds, 0 = off (read by PlaybackService from the same prefs). */
+    var crossfade by mutableIntStateOf(prefs.getInt("crossfade", 0)); private set
+    var skipSilence by mutableStateOf(prefs.getBoolean("skip_silence", false)); private set
+    var speed by mutableFloatStateOf(prefs.getFloat("speed", 1f)); private set
 
     fun changeTheme(v: Int) { theme = v; prefs.edit().putInt("theme", v).apply() }
     fun changeAccent(v: Int) { accent = v; prefs.edit().putInt("accent", v).apply() }
@@ -148,6 +152,9 @@ class Settings(private val prefs: SharedPreferences) {
     fun changeCorners(v: Float) { corners = v; prefs.edit().putFloat("corners", v).apply() }
     fun changeShowDuration(v: Boolean) { showDuration = v; prefs.edit().putBoolean("duration", v).apply() }
     fun changeMiniStyle(v: Int) { miniStyle = v; prefs.edit().putInt("mini_style", v).apply() }
+    fun changeCrossfade(v: Int) { crossfade = v; prefs.edit().putInt("crossfade", v).apply() }
+    fun changeSkipSilence(v: Boolean) { skipSilence = v; prefs.edit().putBoolean("skip_silence", v).apply() }
+    fun changeSpeed(v: Float) { speed = v; prefs.edit().putFloat("speed", v).apply() }
 }
 
 // ───────────────────────── Profile (stored on device) ─────────────────────────

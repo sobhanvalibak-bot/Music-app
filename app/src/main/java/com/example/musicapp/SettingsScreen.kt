@@ -165,6 +165,37 @@ fun SettingsTab(
             }
         }
         item {
+            SettingsCard("Playback", p) {
+                Text(
+                    if (settings.crossfade == 0) "Crossfade: off" else "Crossfade: ${settings.crossfade} s",
+                    fontSize = 15.sp, color = p.text
+                )
+                Slider(
+                    value = settings.crossfade.toFloat(),
+                    onValueChange = { settings.changeCrossfade(it.toInt()) },
+                    valueRange = 0f..12f,
+                    steps = 11,
+                    colors = SliderDefaults.colors(thumbColor = p.accent, activeTrackColor = p.accent)
+                )
+                Text(
+                    "Songs overlap and blend into each other. Gapless playback is always on when crossfade is off.",
+                    fontSize = 12.sp, color = p.secondary
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Skip silence", fontSize = 15.sp, color = p.text)
+                        Text("Jumps over silent parts inside a song", fontSize = 12.sp, color = p.secondary)
+                    }
+                    Switch(
+                        checked = settings.skipSilence,
+                        onCheckedChange = { settings.changeSkipSilence(it) },
+                        colors = SwitchDefaults.colors(checkedTrackColor = p.accent)
+                    )
+                }
+            }
+        }
+        item {
             SettingsCard("Sort songs by", p) {
                 Segmented(SortLabels, settings.sort, p) { settings.changeSort(it) }
             }

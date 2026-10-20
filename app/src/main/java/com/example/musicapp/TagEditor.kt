@@ -135,6 +135,27 @@ object TagEditor {
         }
     }
 
+    /** Lyrics stored inside the audio file (ID3 USLT / Vorbis LYRICS...), or "" when there are none. */
+    suspend fun readLyrics(context: Context, song: Song): String = withContext(Dispatchers.IO) {
+        var cache: File? = null
+        try {
+            prepareLibrary()
+            val (name, path) = fileInfo(context, song)
+            val file = copyToCache(context, song, extensionOf(name, path))
+            cache = file
+            val tag: Tag? = AudioFileIO.read(file).tag
+            try {
+                tag?.getFirst(FieldKey.LYRICS) ?: ""
+            } catch (e: Exception) {
+                ""
+            }
+        } catch (t: Throwable) {
+            ""
+        } finally {
+            cache?.delete()
+        }
+    }
+
     /** Writes [edit] into the audio file itself and refreshes MediaStore. */
     suspend fun save(context: Context, song: Song, edit: TagEdit): SaveResult =
         withContext(Dispatchers.IO) {

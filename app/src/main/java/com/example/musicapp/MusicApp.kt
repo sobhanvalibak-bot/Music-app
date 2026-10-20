@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import kotlinx.coroutines.delay
@@ -250,6 +251,7 @@ fun MusicApp(
     var repeatMode by remember { mutableIntStateOf(Player.REPEAT_MODE_OFF) }
     var position by remember { mutableLongStateOf(0L) }
     var pendingOpen by remember { mutableStateOf(false) }
+    var audioInfo by remember { mutableStateOf<AudioInfo?>(null) }
 
     DisposableEffect(Unit) {
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
@@ -276,7 +278,9 @@ fun MusicApp(
             shuffle = c.shuffleModeEnabled
             repeatMode = c.repeatMode
             current = c.currentMediaItem?.mediaId?.toLongOrNull()?.let { byId[it] }
+            audioInfo = audioInfoFrom(c.currentTracks)
             val listener = object : Player.Listener {
+                override fun onTracksChanged(tracks: Tracks) { audioInfo = audioInfoFrom(tracks) }
                 override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
                 override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) { shuffle = shuffleModeEnabled }
                 override fun onRepeatModeChanged(mode: Int) { repeatMode = mode }
@@ -288,6 +292,8 @@ fun MusicApp(
             onDispose { c.removeListener(listener) }
         }
     }
+
+    LaunchedEffect(controller) { controller?.setPlaybackSpeed(settings.speed) }
 
     fun playQueue(queue: List<Song>, index: Int) {
         val c = controller ?: return
@@ -370,7 +376,7 @@ fun MusicApp(
         if (c != null && showPlayer) {
             while (true) {
                 position = c.currentPosition
-                delay(400)
+                delay(120)
             }
         }
     }
@@ -700,7 +706,14 @@ fun MusicApp(
                     },
                     albumSongs = albumSongs,
                     onPlayAlbumSong = { i -> playQueue(albumSongs, i) },
-                    onEdit = { editTarget = song }
+                    onEdit = { editTarget = song },
+                    settings = settings,
+                    speed = settings.speed,
+                    onSpeed = { v ->
+                        settings.changeSpeed(v)
+                        controller?.setPlaybackSpeed(v)
+                    },
+                    audioInfo = audioInfo
                 )
             }
         }
