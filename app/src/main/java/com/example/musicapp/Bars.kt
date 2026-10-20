@@ -641,7 +641,6 @@ fun TopIsland(
                         .basicMarquee(
                             iterations = Int.MAX_VALUE,
                             initialDelayMillis = 1500,
-                            delayMillis = 1500,   // pause every time the title is back at the start
                             spacing = MarqueeSpacing(28.dp),
                             velocity = 40.dp
                         )
