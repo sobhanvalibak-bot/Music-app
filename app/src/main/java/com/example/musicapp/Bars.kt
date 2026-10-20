@@ -425,8 +425,8 @@ fun GlassTabBar(
                 )
             }
     ) {
-        // 1) the glass capsule itself
-        Box(Modifier.matchParentSize().glass(barShape, p))
+        // 1) Solid, minimal black capsule inspired by the reference design.
+        Box(Modifier.matchParentSize().clip(barShape).background(Color(0xFF101116)))
 
         // 2) the lens: sits inside the bar, and lifts out of it while held
         if (itemW > 0f) {
@@ -471,26 +471,15 @@ fun GlassTabBar(
                         }
                         .clip(lensShape)
                         .background(
-                            if (p.dark) Color.White.copy(alpha = 0.16f + 0.12f * lift)
-                            else Color.Black.copy(alpha = 0.07f + 0.05f * lift)
-                        )
-                        .border(
-                            1.2.dp,
-                            Brush.linearGradient(
-                                listOf(
-                                    Color.White.copy(alpha = 0.55f + 0.45f * lift),
-                                    Color.White.copy(alpha = 0.08f),
-                                    Color.White.copy(alpha = 0.30f + 0.40f * lift)
-                                )
-                            ),
-                            lensShape
+                            if (selected >= 0) Color.White.copy(alpha = 0.10f + 0.06f * lift)
+                            else Color.Transparent
                         )
                 )
             }
         }
 
-        // 3) icons and labels
-        Row(Modifier.fillMaxSize().padding(horizontal = BarPad)) {
+        // 3) Minimal icon-only navigation, matching the supplied reference.
+        Row(Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
             tabs.forEachIndexed { i, (label, glyph) ->
                 val sel = i == selected
                 val tint by animateColorAsState(if (sel) p.accent else p.secondary, label = "tint")
@@ -527,12 +516,7 @@ fun GlassTabBar(
                             GlyphIcon(glyph, tint, Modifier.size(24.dp))
                         }
                     }
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        label, fontSize = 10.sp,
-                        fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium,
-                        color = tint, maxLines = 1
-                    )
+                    // Labels are intentionally hidden in the compact floating dock.
                 }
             }
         }
@@ -550,7 +534,7 @@ private fun ClassicTabBar(
 ) {
     val tabs = listOf("Songs" to Glyph.Note, "Albums" to Glyph.Album, "Artists" to Glyph.Artist, "Profile" to Glyph.Artist)
     Row(
-        modifier.height(BarHeight).background(p.card),
+        modifier.height(BarHeight).background(Color(0xFF101116)),
         verticalAlignment = Alignment.CenterVertically
     ) {
         tabs.forEachIndexed { i, (label, glyph) ->
@@ -652,7 +636,8 @@ fun TopIsland(
         Row(
             Modifier
                 .graphicsLayer { scaleX = pop.value; scaleY = pop.value }
-                .width(112.dp)
+                .widthIn(max = 340.dp)
+                .fillMaxWidth(0.90f)
                 .height(pillH)
                 .clip(shape)
                 .background(Color.Black)
@@ -660,10 +645,10 @@ fun TopIsland(
                 .clickable { menuOpen = true }
                 .padding(horizontal = 5.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
+            horizontalArrangement = Arrangement.Start
         ) {
             Cover(song, Modifier.size(27.dp), 0.dp, p, 200, round = true)
-            Spacer(Modifier.width(15.dp))
+            Spacer(Modifier.weight(1f))
             Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
                 repeat(4) { i ->
                     val barHeight = if (isPlaying) listOf(8, 15, 10, 18)[i].dp else 4.dp
