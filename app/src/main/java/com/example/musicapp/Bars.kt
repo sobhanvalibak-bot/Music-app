@@ -176,6 +176,16 @@ fun MiniPlayer(
                     .shadow(16.dp, shape, ambientColor = Color.Black.copy(alpha = 0.5f), spotColor = Color.Black.copy(alpha = 0.5f))
                     .clip(shape)
                     .background(Color.Black)
+                    .drawBehind {
+                        // Low-cost Liquid Neon rim, tinted by the active cover palette.
+                        drawRoundRect(
+                            brush = Brush.linearGradient(
+                                colors = listOf(p.accent.copy(alpha = if (island) 0.24f else 0.08f), Color.Transparent, p.accent.copy(alpha = if (island) 0.12f else 0.04f))
+                            ),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.2.dp.toPx())
+                        )
+                    }
                     .border(1.dp, Color.White.copy(alpha = 0.10f), shape)
                     .padding(horizontal = 9.dp, vertical = 9.dp)
                 else Modifier
@@ -639,6 +649,24 @@ fun TopIsland(
         Row(
             Modifier
                 .graphicsLayer { scaleX = pop.value; scaleY = pop.value }
+                .drawBehind {
+                    drawRoundRect(
+                        brush = Brush.horizontalGradient(listOf(p.accent.copy(alpha = 0.34f), Color.Transparent, p.accent.copy(alpha = 0.18f))),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.4.dp.toPx())
+                    )
+                }
+                .pointerInput(song.id) {
+                    var drag = 0f
+                    detectHorizontalDragGestures(
+                        onHorizontalDrag = { change, amount -> change.consume(); drag += amount },
+                        onDragEnd = {
+                            if (drag < -36f) onNext() else if (drag > 36f) onPrev()
+                            drag = 0f
+                        },
+                        onDragCancel = { drag = 0f }
+                    )
+                }
                 .widthIn(min = 180.dp, max = 360.dp)
                 .width(islandWidthDp.dp)
                 .height(pillH)
