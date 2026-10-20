@@ -1,5 +1,7 @@
 package com.example.musicapp
 
+import android.content.Intent
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -89,6 +91,7 @@ fun FullPlayer(
     onMoveQueueItem: (Int, Int) -> Unit,
     onClearUpcoming: () -> Unit
 ) {
+    val context = LocalContext.current
     var showQueue by remember { mutableStateOf(false) }
     var showAlbum by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
@@ -152,7 +155,23 @@ fun FullPlayer(
                 Text("Now Playing", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = p.secondary)
                 Spacer(Modifier.weight(1f))
                 Box(
-                    Modifier.size(44.dp).clip(CircleShape).clickable { onEdit() },
+                    Modifier.size(40.dp).clip(CircleShape).clickable {
+                        try {
+                            val shareText = "${song.title} — ${song.artist}" + if (song.album.isNotBlank()) "\n${song.album}" else ""
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_SUBJECT, song.title)
+                                putExtra(Intent.EXTRA_TEXT, shareText)
+                            }
+                            context.startActivity(Intent.createChooser(send, "Share song"))
+                        } catch (_: Exception) {
+                            Toast.makeText(context, "Unable to share this song", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    contentAlignment = Alignment.Center
+                ) { Text("↗", fontSize = 23.sp, color = p.text) }
+                Box(
+                    Modifier.size(40.dp).clip(CircleShape).clickable { onEdit() },
                     contentAlignment = Alignment.Center
                 ) { GlyphIcon(Glyph.Edit, p.text, Modifier.size(20.dp)) }
             }
