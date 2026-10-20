@@ -1,31 +1,89 @@
 package com.example.musicapp
 
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.view.WindowManager
+import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
+
+/** Opens the system share sheet with the song's title, artist and album. */
+fun shareSong(context: Context, song: Song) {
+    try {
+        val shareText = "${song.title} — ${song.artist}" + if (song.album.isNotBlank()) "\n${song.album}" else ""
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, song.title)
+            putExtra(Intent.EXTRA_TEXT, shareText)
+        }
+        context.startActivity(Intent.createChooser(send, "Share song"))
+    } catch (_: Exception) {
+        Toast.makeText(context, "Unable to share this song", Toast.LENGTH_SHORT).show()
+    }
+}
 
 /**
  * The menu that opens from the three dots of a song and from a long press.
- * An iOS-style bottom sheet: song header on top, grouped rounded actions below.
+ * iOS style: the pressed row lifts, the app behind it blurs, and the same frosted menu as the
+ * Dynamic Island opens right under the row (or above it when there is no room below).
+ *
+ * [anchor] = bounds of the pressed row on the screen (null: the menu opens near the top).
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SongActionSheet(
     song: Song,
@@ -36,149 +94,143 @@ fun SongActionSheet(
     onPlayNext: (() -> Unit)?,
     onAddToPlaylist: (() -> Unit)?,
     onEditInfo: (() -> Unit)?,
-    onRemove: (() -> Unit)?
+    onRemove: (() -> Unit)?,
+    anchor: Rect? = null
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val context = LocalContext.current
+    val density = LocalDensity.current
     val scope = rememberCoroutineScope()
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { shown = true }
 
-    // close the sheet with its slide-down animation, then run the action
-    fun act(action: () -> Unit) {
+    // close with a short animation, then run the chosen action
+    fun close(action: (() -> Unit)? = null) {
         scope.launch {
-            sheetState.hide()
-            action()
+            shown = false
+            delay(150)
+            action?.invoke()
             onDismiss()
         }
     }
 
-    class Item(val glyph: Glyph, val label: String, val tint: Color, val run: () -> Unit)
-
-    val items = buildList {
-        if (onPlayNext != null) add(Item(Glyph.Next, "Play next", p.accent) { onPlayNext() })
-        if (onAddToPlaylist != null) add(Item(Glyph.Plus, "Add to playlist", p.accent) { onAddToPlaylist() })
-        add(
-            Item(
-                if (fav) Glyph.Heart else Glyph.HeartOutline,
-                if (fav) "Remove from favorites" else "Add to favorites",
-                p.accent
-            ) { onFav() }
-        )
-        if (onEditInfo != null) add(Item(Glyph.Edit, "Edit song info", p.accent) { onEditInfo() })
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = p.bg,
-        contentColor = p.text,
-        dragHandle = {
-            Box(
-                Modifier
-                    .padding(top = 10.dp, bottom = 6.dp)
-                    .size(width = 38.dp, height = 5.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(p.secondary.copy(alpha = 0.45f))
-            )
-        }
+    Dialog(
+        onDismissRequest = { close() },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
-        Column(
+        val view = LocalView.current
+        // real blur of the app behind the dialog (Android 12+), plus our own soft dim below
+        SideEffect {
+            val w = (view.parent as? DialogWindowProvider)?.window
+            if (w != null) {
+                w.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+                if (Build.VERSION.SDK_INT >= 31) {
+                    w.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                    val lp = w.attributes
+                    lp.blurBehindRadius = 28
+                    w.attributes = lp
+                }
+            }
+        }
+
+        var originX by remember { mutableFloatStateOf(0f) }
+        var originY by remember { mutableFloatStateOf(0f) }
+        var rootW by remember { mutableIntStateOf(0) }
+        var rootH by remember { mutableIntStateOf(0) }
+        var menuH by remember { mutableIntStateOf(0) }
+        val scrim by animateFloatAsState(if (shown) 1f else 0f, tween(180), label = "menuScrim")
+
+        // pressed row, in the coordinates of this dialog
+        val fallbackTop = rootH * 0.22f
+        val rowH = anchor?.height ?: with(density) { 70.dp.toPx() }
+        val rowTop = if (anchor != null) anchor.top - originY else fallbackTop
+        val rowLeft = if (anchor != null) anchor.left - originX else 0f
+        val rowW = if (anchor != null) anchor.width else rootW.toFloat()
+        val gap = with(density) { 10.dp.toPx() }
+        val bottomLimit = rootH - with(density) { 28.dp.toPx() }
+        val below = rowTop + rowH + gap + menuH <= bottomLimit
+        val menuTop = if (below) rowTop + rowH + gap else (rowTop - gap - menuH).coerceAtLeast(with(density) { 8.dp.toPx() })
+        val menuLeft = with(density) { 20.dp.toPx() }
+        val origin = TransformOrigin(0.1f, if (below) 0f else 1f)
+
+        Box(
             Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 20.dp)
+                .fillMaxSize()
+                .onGloballyPositioned {
+                    val loc = IntArray(2)
+                    view.getLocationOnScreen(loc)
+                    originX = loc[0].toFloat()
+                    originY = loc[1].toFloat()
+                    rootW = it.size.width
+                    rootH = it.size.height
+                }
+                .background(Color.Black.copy(alpha = (if (p.dark) 0.30f else 0.12f) * scrim))
+                .pointerInput(Unit) { detectTapGestures { close() } }
         ) {
-            // Header: cover + title + artist + album
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // the pressed row, lifted
+            AnimatedVisibility(
+                visible = shown,
+                modifier = Modifier.offset { IntOffset(rowLeft.roundToInt(), rowTop.roundToInt()) },
+                enter = fadeIn(tween(120)) + scaleIn(spring(dampingRatio = 0.7f, stiffness = 420f), initialScale = 0.97f),
+                exit = fadeOut(tween(100))
             ) {
-                Cover(song, Modifier.size(68.dp), 14.dp, p, 300)
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        song.title, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                        fontSize = 18.sp, fontWeight = FontWeight.Bold, color = p.text
-                    )
-                    Text(
-                        song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        fontSize = 14.sp, color = p.accent
-                    )
-                    Text(
-                        song.album, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        fontSize = 12.sp, color = p.secondary
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // Grouped actions
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(p.card)
-            ) {
-                items.forEachIndexed { i, item ->
-                    SheetRow(item.glyph, item.label, item.tint, p) { act(item.run) }
-                    if (i < items.lastIndex) SheetDivider(p)
-                }
-            }
-
-            if (onRemove != null) {
-                Spacer(Modifier.height(12.dp))
-                Column(
+                Row(
                     Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp))
+                        .width(with(density) { rowW.toDp() })
+                        .height(with(density) { rowH.toDp() })
+                        .graphicsLayer { scaleX = 1.03f; scaleY = 1.03f }
+                        .clip(RoundedCornerShape(16.dp))
                         .background(p.card)
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    SheetRow(Glyph.Close, "Remove from this list", Color(0xFFFF453A), p, labelColor = Color(0xFFFF453A)) {
-                        act { onRemove() }
+                    Cover(song, Modifier.size(52.dp), 10.dp, p, 300)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            fontSize = 16.sp, fontWeight = FontWeight.Medium, color = p.text
+                        )
+                        Text(
+                            song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            fontSize = 14.sp, color = p.secondary
+                        )
                     }
                 }
             }
+
+            // the menu
+            val red = Color(0xFFFF3B30)
+            val groups = listOf(
+                buildList<MenuAction> {
+                    if (onPlayNext != null) add(MenuAction("Play next", Glyph.Next) { close { onPlayNext() } })
+                    if (onAddToPlaylist != null) add(MenuAction("Add to playlist", Glyph.PlusCircle) { close { onAddToPlaylist() } })
+                    add(
+                        MenuAction(
+                            if (fav) "Remove favorite" else "Favorite",
+                            if (fav) Glyph.Heart else Glyph.HeartOutline
+                        ) { close { onFav() } }
+                    )
+                },
+                buildList<MenuAction> {
+                    if (onEditInfo != null) add(MenuAction("Edit info", Glyph.Edit) { close { onEditInfo() } })
+                    add(MenuAction("Share", Glyph.Share) { close { shareSong(context, song) } })
+                },
+                buildList<MenuAction> {
+                    if (onRemove != null) add(MenuAction("Remove from this list", Glyph.Close, red) { close { onRemove() } })
+                }
+            ).filter { it.isNotEmpty() }
+
+            AnimatedVisibility(
+                visible = shown,
+                modifier = Modifier.offset { IntOffset(menuLeft.roundToInt(), menuTop.roundToInt()) },
+                enter = fadeIn(tween(140)) + scaleIn(spring(dampingRatio = 0.72f, stiffness = 420f), initialScale = 0.82f, transformOrigin = origin),
+                exit = fadeOut(tween(100)) + scaleOut(tween(120), targetScale = 0.92f, transformOrigin = origin)
+            ) {
+                // hidden for the very first frame, until its height is known (to choose below/above)
+                Box(Modifier.graphicsLayer { alpha = if (menuH > 0) 1f else 0f }.onSizeChanged { menuH = it.height }) {
+                    IslandContextMenu(groups = groups, p = p)
+                }
+            }
         }
     }
-}
-
-@Composable
-private fun SheetRow(
-    glyph: Glyph,
-    label: String,
-    tint: Color,
-    p: Palette,
-    labelColor: Color = p.text,
-    onClick: () -> Unit
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(tint.copy(alpha = 0.16f)),
-            contentAlignment = Alignment.Center
-        ) { GlyphIcon(glyph, tint, Modifier.size(18.dp)) }
-        Spacer(Modifier.width(14.dp))
-        Text(label, fontSize = 16.sp, fontWeight = FontWeight.Medium, color = labelColor)
-    }
-}
-
-@Composable
-private fun SheetDivider(p: Palette) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = 62.dp)
-            .height(0.5.dp)
-            .background(p.secondary.copy(alpha = 0.25f))
-    )
 }

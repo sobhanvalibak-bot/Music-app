@@ -33,7 +33,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -123,10 +128,25 @@ fun SongRow(
     dragModifier: Modifier? = null
 ) {
     var sheetOpen by remember(song.id) { mutableStateOf(false) }
+    var anchor by remember(song.id) { mutableStateOf<Rect?>(null) }
+    val rowCoords = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    val view = LocalView.current
     val haptic = LocalHapticFeedback.current
+    // remember where the row is on the screen, so the menu can open right under it
+    fun openMenu() {
+        val c = rowCoords[0]
+        anchor = if (c != null && c.isAttached) {
+            val b = c.boundsInWindow()
+            val loc = IntArray(2)
+            view.getLocationOnScreen(loc)
+            Rect(b.left + loc[0], b.top + loc[1], b.right + loc[0], b.bottom + loc[1])
+        } else null
+        sheetOpen = true
+    }
     Row(
         Modifier
             .fillMaxWidth()
+            .onGloballyPositioned { rowCoords[0] = it }
             .then(
                 if (dragModifier != null) {
                     // long-press + drag reorders the song instead of opening the menu
@@ -135,7 +155,7 @@ fun SongRow(
                     onClick = onClick,
                     onLongClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        sheetOpen = true
+                        openMenu()
                     }
                 )
             )
@@ -160,7 +180,7 @@ fun SongRow(
             Text(formatTime(song.durationMs), fontSize = 13.sp, color = p.secondary)
         }
         Box {
-            IconButton(onClick = { sheetOpen = true }, modifier = Modifier.size(36.dp)) {
+            IconButton(onClick = { openMenu() }, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Default.MoreVert, contentDescription = "Song options", tint = p.secondary)
             }
             if (sheetOpen) {
@@ -173,7 +193,8 @@ fun SongRow(
                     onPlayNext = onPlayNext,
                     onAddToPlaylist = onLong,
                     onEditInfo = onEditInfo,
-                    onRemove = onRemove
+                    onRemove = onRemove,
+                    anchor = anchor
                 )
             }
         }

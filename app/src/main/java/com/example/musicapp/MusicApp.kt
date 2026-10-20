@@ -819,18 +819,7 @@ fun MusicApp(
                                     MenuAction("Edit info", Glyph.Edit) { editTarget = menuSong; islandMenu = false },
                                     MenuAction("Share", Glyph.Share) {
                                         islandMenu = false
-                                        try {
-                                            val shareText = "${menuSong.title} — ${menuSong.artist}" +
-                                                if (menuSong.album.isNotBlank()) "\n${menuSong.album}" else ""
-                                            val send = Intent(Intent.ACTION_SEND).apply {
-                                                type = "text/plain"
-                                                putExtra(Intent.EXTRA_SUBJECT, menuSong.title)
-                                                putExtra(Intent.EXTRA_TEXT, shareText)
-                                            }
-                                            context.startActivity(Intent.createChooser(send, "Share song"))
-                                        } catch (_: Exception) {
-                                            Toast.makeText(context, "Unable to share this song", Toast.LENGTH_SHORT).show()
-                                        }
+                                        shareSong(context, menuSong)
                                     }
                                 )
                             )
