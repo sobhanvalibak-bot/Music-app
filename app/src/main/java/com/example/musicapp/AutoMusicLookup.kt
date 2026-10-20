@@ -17,41 +17,108 @@ data class OnlineSongInfo(
 )
 data class LyricsLine(val timeMs: Long, val text: String)
 
+/** The phone itself (data-saver, per-app network switch, VPN lockdown...) refused the socket. */
+class NetworkBlockedException(cause: Throwable?) : java.io.IOException("NETWORK_BLOCKED", cause)
+
 object AutoMusicLookup {
+    private fun isBlocked(e: Throwable): Boolean {
+        var t: Throwable? = e
+        var depth = 0
+        while (t != null && depth < 8) {
+            val m = t.message.orEmpty()
+            if (t is SecurityException || m.contains("EPERM", true) || m.contains("Operation not permitted", true) ||
+                m.contains("Permission denied", true) || m.contains("INTERNET permission", true)) return true
+            t = t.cause; depth++
+        }
+        return false
+    }
+
     private fun get(url: String): String {
-        val c = (URL(url).openConnection() as HttpURLConnection)
-        c.connectTimeout = 15000
-        c.readTimeout = 15000
-        c.instanceFollowRedirects = true
-        c.requestMethod = "GET"
-        c.setRequestProperty("User-Agent", "MusicApp/1.2 (Android; music metadata lookup)")
-        c.setRequestProperty("Accept", "application/json, text/plain, */*")
-        return try {
-            val code = c.responseCode
-            val stream = if (code in 200..299) c.inputStream else c.errorStream
-            val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (code !in 200..299) throw java.io.IOException("Online service returned HTTP $code")
-            body
-        } finally { c.disconnect() }
+        try {
+            val c = (URL(url).openConnection() as HttpURLConnection)
+            c.connectTimeout = 15000
+            c.readTimeout = 15000
+            c.instanceFollowRedirects = true
+            c.requestMethod = "GET"
+            c.setRequestProperty("User-Agent", "MusicApp/1.2 (Android; music metadata lookup)")
+            c.setRequestProperty("Accept", "application/json, text/plain, */*")
+            return try {
+                val code = c.responseCode
+                val stream = if (code in 200..299) c.inputStream else c.errorStream
+                val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (code !in 200..299) throw java.io.IOException("Online service returned HTTP $code")
+                body
+            } finally { c.disconnect() }
+        } catch (e: NetworkBlockedException) {
+            throw e
+        } catch (e: Exception) {
+            if (isBlocked(e)) throw NetworkBlockedException(e) else throw e
+        }
+    }
+
+    private fun norm(s: String) = s.lowercase()
+        .replace(Regex("\\(.*?\\)|\\[.*?]"), " ")
+        .replace(Regex("[^\\p{L}\\p{N} ]"), " ")
+        .replace(Regex("\\s+"), " ").trim()
+
+    private fun artistParts(a: String) = a.split(',', '&', '_', ';').map { norm(it) }.filter { it.isNotBlank() }
+
+    /** Best candidate: the title must match, and a matching artist wins over a matching title alone. */
+    private fun score(trackName: String, artistName: String, title: String, artist: String): Int {
+        val tn = norm(trackName); val tt = norm(title)
+        if (tt.isBlank()) return 0
+        var pts = when {
+            tn == tt -> 4
+            tn.contains(tt) || (tn.isNotBlank() && tt.contains(tn)) -> 2
+            else -> return 0 // a different song by the same artist is not a match
+        }
+        val an = norm(artistName)
+        if (an.isNotBlank() && artistParts(artist).any { an.contains(it) || it.contains(an) }) pts += 3
+        return pts
     }
 
     suspend fun songInfo(title: String, artist: String): OnlineSongInfo? = withContext(Dispatchers.IO) {
-        try {
-            val q = URLEncoder.encode("$title $artist", "UTF-8")
-            val root = JSONObject(get("https://itunes.apple.com/search?term=$q&entity=song&limit=5"))
-            val arr = root.optJSONArray("results") ?: return@withContext null
-            if (arr.length() == 0) return@withContext null
-            val target = (0 until arr.length()).map { arr.getJSONObject(it) }.firstOrNull {
-                it.optString("trackName").contains(title, true) || it.optString("artistName").contains(artist, true)
-            } ?: arr.getJSONObject(0)
-            OnlineSongInfo(
-                target.optString("trackName", title), target.optString("artistName", artist),
-                target.optString("collectionName", ""), target.optString("primaryGenreName", ""),
-                target.optString("releaseDate", "").take(4), target.optString("artworkUrl100", "").replace("100x100", "600x600")
-            )
-        } catch (e: Exception) {
-            throw e
+        var firstError: Exception? = null
+        val fromItunes = try { itunes(title, artist) } catch (e: NetworkBlockedException) { throw e } catch (e: Exception) { firstError = e; null }
+        if (fromItunes != null) return@withContext fromItunes
+        // fallback provider: some regions/networks block one catalog but not the other
+        val fromDeezer = try { deezer(title, artist) } catch (e: NetworkBlockedException) { throw e } catch (e: Exception) { if (firstError == null) firstError = e; null }
+        if (fromDeezer == null && firstError != null) throw firstError
+        fromDeezer
+    }
+
+    private fun itunes(title: String, artist: String): OnlineSongInfo? {
+        val q = URLEncoder.encode("$title $artist".trim(), "UTF-8")
+        val root = JSONObject(get("https://itunes.apple.com/search?term=$q&entity=song&limit=10"))
+        val arr = root.optJSONArray("results") ?: return null
+        val best = (0 until arr.length()).map { arr.getJSONObject(it) }
+            .map { it to score(it.optString("trackName"), it.optString("artistName"), title, artist) }
+            .filter { it.second >= 2 }.maxByOrNull { it.second }?.first ?: return null
+        return OnlineSongInfo(
+            best.optString("trackName", title), best.optString("artistName", artist),
+            best.optString("collectionName", ""), best.optString("primaryGenreName", ""),
+            best.optString("releaseDate", "").take(4), best.optString("artworkUrl100", "").replace("100x100", "600x600")
+        )
+    }
+
+    private fun deezer(title: String, artist: String): OnlineSongInfo? {
+        val q = URLEncoder.encode("$title $artist".trim(), "UTF-8")
+        val arr = JSONObject(get("https://api.deezer.com/search?q=$q&limit=10")).optJSONArray("data") ?: return null
+        val best = (0 until arr.length()).map { arr.getJSONObject(it) }
+            .map { it to score(it.optString("title"), it.optJSONObject("artist")?.optString("name").orEmpty(), title, artist) }
+            .filter { it.second >= 2 }.maxByOrNull { it.second }?.first ?: return null
+        val album = best.optJSONObject("album")
+        var genre = ""; var year = ""
+        val albumId = album?.optLong("id", -1L) ?: -1L
+        if (albumId > 0) runCatching {
+            val a = JSONObject(get("https://api.deezer.com/album/$albumId"))
+            genre = a.optJSONObject("genres")?.optJSONArray("data")?.optJSONObject(0)?.optString("name").orEmpty()
+            year = a.optString("release_date", "").take(4)
         }
+        return OnlineSongInfo(
+            best.optString("title", title), best.optJSONObject("artist")?.optString("name") ?: artist,
+            album?.optString("title").orEmpty(), genre, year, album?.optString("cover_xl").orEmpty()
+        )
     }
 
 
@@ -103,6 +170,6 @@ object AutoMusicLookup {
                 val ms = m.groupValues[1].toLong() * 60_000 + m.groupValues[2].toLong() * 1000 + fraction
                 LyricsLine(ms, m.groupValues[4].trim())
             }.filter { it.text.isNotBlank() }.sortedBy { it.timeMs }.toList()
-        } catch (_: Exception) { emptyList() }
+        } catch (e: NetworkBlockedException) { throw e } catch (_: Exception) { emptyList() }
     }
 }

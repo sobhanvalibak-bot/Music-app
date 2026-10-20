@@ -1,5 +1,8 @@
 package com.example.musicapp
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -190,6 +193,23 @@ fun EditSongDialog(
     var onlineMessage by remember(song.id) { mutableStateOf("") }
     var lyrics by remember(song.id) { mutableStateOf<List<LyricsLine>>(emptyList()) }
     var showLyrics by remember(song.id) { mutableStateOf(false) }
+    var networkBlocked by remember(song.id) { mutableStateOf(false) }
+    fun explain(e: Exception): String {
+        networkBlocked = e is NetworkBlockedException
+        val detail = (e.cause?.message ?: e.message).orEmpty()
+        return when {
+            e is NetworkBlockedException ->
+                "Your phone is blocking this app's internet (the app itself has the permission). Check: " +
+                "1) App settings > Restrict data usage: allow Wi-Fi and mobile data. " +
+                "2) If you use a VPN: turn it on, or turn off \"Block connections without VPN\". " +
+                "3) Turn off Data saver / Battery saver for this app."
+            detail.contains("UnknownHost", true) || detail.contains("unable to resolve", true) ->
+                "Could not reach the online catalog. Check your connection, DNS or VPN."
+            detail.contains("timed out", true) || detail.contains("timeout", true) ->
+                "The online catalog took too long to respond. Try again shortly."
+            else -> "Online request failed: $detail"
+        }
+    }
 
     LaunchedEffect(song.id) {
         val t = TagEditor.readTags(context, song)
@@ -221,13 +241,13 @@ fun EditSongDialog(
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(enabled = enabled && !onlineBusy, onClick = {
-                        onlineBusy = true; onlineMessage = "Searching online…"
+                        onlineBusy = true; networkBlocked = false; onlineMessage = "Searching online…"
                         scope.launch {
-                            var lookupFailure: String? = null
+                            var lookupError: Exception? = null
                             val info = try {
                                 AutoMusicLookup.songInfo(title.ifBlank { song.title }, artist.ifBlank { song.artist })
                             } catch (e: Exception) {
-                                lookupFailure = e.message
+                                lookupError = e
                                 null
                             }
                             if (info != null) {
@@ -236,36 +256,34 @@ fun EditSongDialog(
                                 val coverSaved = AutoMusicLookup.downloadCover(context, song.id, info.artworkUrl)
                                 if (coverSaved) invalidateSongCover(song.id)
                                 onlineMessage = if (coverSaved) "Metadata and album cover downloaded for this app." else "Metadata found; no cover image was available."
-                            } else onlineMessage = if (lookupFailure != null) {
-                                val detail = lookupFailure.orEmpty()
-                                when {
-                                    detail.contains("Permission denied", ignoreCase = true) || detail.contains("INTERNET permission", ignoreCase = true) ->
-                                        "Android denied the network request. INTERNET permission is declared in the app manifest; install the newest build again and retry. Details: $detail"
-                                    detail.contains("UnknownHost", ignoreCase = true) || detail.contains("unable to resolve", ignoreCase = true) ->
-                                        "Could not resolve the online catalog host. Check DNS, VPN or network restrictions. Details: $detail"
-                                    detail.contains("timed out", ignoreCase = true) || detail.contains("timeout", ignoreCase = true) ->
-                                        "The online catalog took too long to respond. Try again shortly. Details: $detail"
-                                    else -> "Online catalog request failed: $detail"
-                                }
-                            } else {
-                                "No matching track found in the online catalog. Try a shorter title or include the artist."
-                            }
+                            } else onlineMessage = if (lookupError != null) explain(lookupError!!)
+                            else "No matching track found online. Try a shorter title or include the artist."
                             onlineBusy = false
                         }
                     }) { Text(if (onlineBusy) "Searching…" else "Auto-fill online", color = p.accent) }
                     TextButton(enabled = enabled && !onlineBusy, onClick = {
-                        onlineBusy = true; onlineMessage = "Looking for synchronized lyrics…"
+                        onlineBusy = true; networkBlocked = false; onlineMessage = "Looking for synchronized lyrics…"
                         scope.launch {
-                            lyrics = AutoMusicLookup.lyrics(title.ifBlank { song.title }, artist.ifBlank { song.artist })
-                            // keep a copy on the device so the player shows them offline from now on
-                            if (lyrics.isNotEmpty()) LyricsStore.saveLines(context, song.id, lyrics)
-                            showLyrics = true
-                            onlineMessage = if (lyrics.isNotEmpty()) "Synced lyrics found (${lyrics.size} lines)." else "No synced lyrics found for this track."
+                            try {
+                                lyrics = AutoMusicLookup.lyrics(title.ifBlank { song.title }, artist.ifBlank { song.artist })
+                                // keep a copy on the device so the player shows them offline from now on
+                                if (lyrics.isNotEmpty()) LyricsStore.saveLines(context, song.id, lyrics)
+                                showLyrics = true
+                                onlineMessage = if (lyrics.isNotEmpty()) "Synced lyrics found (${lyrics.size} lines)." else "No synced lyrics found for this track."
+                            } catch (e: Exception) {
+                                onlineMessage = explain(e)
+                            }
                             onlineBusy = false
                         }
                     }) { Text("Find lyrics", color = p.accent) }
                 }
                 if (onlineMessage.isNotBlank()) Text(onlineMessage, color = p.secondary, fontSize = 12.sp)
+                if (networkBlocked) TextButton(onClick = {
+                    context.startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }) { Text("Open app settings", color = p.accent) }
                 OutlinedTextField(
                     value = title, onValueChange = { title = it }, enabled = enabled,
                     label = { Text("Title") }, singleLine = true, colors = fieldColors(p)
