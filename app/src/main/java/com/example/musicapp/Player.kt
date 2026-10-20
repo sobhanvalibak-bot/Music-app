@@ -30,6 +30,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -145,7 +147,7 @@ fun FullPlayer(
     val shownMs = if (dragging) (dragValue * duration).toLong() else position
 
     val coverScale by animateFloatAsState(
-        if (isPlaying) 1f else 0.9f,
+        if (isPlaying) 1f else 0.82f,
         spring(dampingRatio = 0.6f, stiffness = 300f),
         label = "coverScale"
     )
@@ -173,6 +175,8 @@ fun FullPlayer(
     val activeLyric = if (lyricSynced) lyricLines.indexOfLast { it.timeMs <= position + 120L } else -1
     val currentLine = if (activeLyric >= 0) lyricLines[activeLyric].text else if (!lyricSynced && lyricLines.isNotEmpty()) lyricLines.first().text else ""
 
+    val tiltState = rememberDeviceTilt()
+
     Box(
         Modifier
             .fillMaxSize()
@@ -187,6 +191,7 @@ fun FullPlayer(
                 )
             }
     ) {
+        AnimatedCoverBackground(p.accent, Modifier.fillMaxSize())
         Column(
             Modifier
                 .fillMaxSize()
@@ -229,6 +234,9 @@ fun FullPlayer(
                         .graphicsLayer {
                             scaleX = coverScale
                             scaleY = coverScale
+                            cameraDistance = 14f * density
+                            rotationY = tiltState.value.x * 26f
+                            rotationX = -tiltState.value.y * 26f
                             shadowElevation = 28.dp.toPx()
                             shape = RoundedCornerShape(16.dp)
                             clip = false
@@ -506,10 +514,27 @@ private fun PlayerIconButton(
             pop.animateTo(1f, spring(dampingRatio = 0.35f, stiffness = 420f))
         }
     }
+    val ring = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(bounce) {
+        if (bounce) {
+            ring.snapTo(0f)
+            ring.animateTo(1f, androidx.compose.animation.core.tween(650))
+        }
+    }
     val onClickS by rememberUpdatedState(onClick)
     Box(
         Modifier
             .size(size)
+            .drawBehind {
+                val r = ring.value
+                if (r > 0.001f && r < 0.999f) {
+                    drawCircle(
+                        color = color.copy(alpha = (1f - r) * 0.8f),
+                        radius = this.size.minDimension / 2f * (0.7f + 1.1f * r),
+                        style = Stroke(width = 3.dp.toPx() * (1f - r) + 1f)
+                    )
+                }
+            }
             .graphicsLayer { scaleX = scale * pop.value; scaleY = scale * pop.value }
             .clip(CircleShape)
             .then(if (filled != null) Modifier.background(filled) else Modifier)
@@ -563,7 +588,7 @@ private fun SpotifySeekBar(
             },
         contentAlignment = Alignment.CenterStart
     ) {
-        val trackH = 4.dp + 2.dp * grow
+        val trackH = 4.dp + 6.dp * grow
         Box(
             Modifier.fillMaxWidth().height(trackH).clip(RoundedCornerShape(50))
                 .background(Color.White.copy(alpha = 0.28f))
@@ -572,7 +597,7 @@ private fun SpotifySeekBar(
             Modifier.fillMaxWidth(value.coerceIn(0f, 1f)).height(trackH).clip(RoundedCornerShape(50))
                 .background(Color.White)
         )
-        val thumb = 12.dp + 4.dp * grow
+        val thumb = 12.dp - 4.dp * grow
         Box(
             Modifier
                 .offset { androidx.compose.ui.unit.IntOffset((value.coerceIn(0f, 1f) * widthPx - thumb.toPx() / 2f).toInt(), 0) }

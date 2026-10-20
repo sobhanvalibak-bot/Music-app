@@ -170,7 +170,20 @@ fun SongRow(
             .padding(start = 20.dp, end = 8.dp, top = 7.dp, bottom = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Cover(song, Modifier.size(56.dp), 10.dp, p, 300)
+        Box(Modifier.size(56.dp)) {
+            Cover(song, Modifier.size(56.dp), 10.dp, p, 300)
+            if (playing) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .clip(RoundedCornerShape(10.dp * p.corner))
+                        .background(Color.Black.copy(alpha = 0.38f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    EqualizerBars(Color.White, PlaybackBridge.isPlayingNow, Modifier.size(20.dp))
+                }
+            }
+        }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(
@@ -411,10 +424,35 @@ fun SongListPage(
     onRemove: ((Song) -> Unit)?,
     backLabel: String = "Profile",
     onPlayNext: (Song) -> Unit = {},
-    onEditInfo: (Song) -> Unit = {}
+    onEditInfo: (Song) -> Unit = {},
+    stretchHeader: Boolean = false
 ) {
-    LazyColumn(contentPadding = PaddingValues(top = topPad, bottom = bottomPad)) {
+    val stretch = rememberStretchState()
+    LazyColumn(
+        modifier = Modifier.nestedScroll(stretch.connection),
+        contentPadding = PaddingValues(top = topPad, bottom = bottomPad)
+    ) {
         item { BackBar(backLabel, p, onBack) }
+        if (stretchHeader && songs.isNotEmpty()) {
+            item {
+                val extra = with(LocalDensity.current) { (stretch.pull * 0.5f).toDp() }
+                Box(
+                    Modifier.fillMaxWidth().height(226.dp + extra).padding(top = 6.dp),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Cover(
+                        songs.first(),
+                        Modifier.size(210.dp).graphicsLayer {
+                            val sc = 1f + stretch.pull / 420f
+                            scaleX = sc
+                            scaleY = sc
+                            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
+                        },
+                        18.dp, p, 700
+                    )
+                }
+            }
+        }
         item { LargeTitle(title, subtitle, p) }
         if (songs.isEmpty()) {
             item {
@@ -896,6 +934,7 @@ fun AlbumsTab(
             else (gridState.firstVisibleItemScrollOffset / fadePx).coerceIn(0f, 1f)
         }
     }
+    val albumOrder = remember(albums) { albums.withIndex().associate { it.value.first().albumId to it.index } }
     Box(Modifier.fillMaxSize()) {
     LazyVerticalGrid(
         state = gridState,
@@ -912,6 +951,7 @@ fun AlbumsTab(
         }
         gridItems(albums, key = { it.first().albumId }) { list ->
             val first = list.first()
+            val order = albumOrder[first.albumId] ?: 0
             MenuTarget(
                 p = p,
                 onClick = { onPlay(list) },
@@ -927,7 +967,7 @@ fun AlbumsTab(
                     )
                 }
             ) {
-                Column(Modifier.padding(6.dp)) {
+                Column(Modifier.staggerIn(order, order < 12).padding(6.dp)) {
                     Cover(first, Modifier.fillMaxWidth().aspectRatio(1f), 16.dp, p, 700)
                     Spacer(Modifier.height(8.dp))
                     Text(

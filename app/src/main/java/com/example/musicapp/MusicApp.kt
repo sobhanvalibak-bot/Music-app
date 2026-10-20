@@ -295,6 +295,7 @@ fun MusicApp(
     var controller by remember { mutableStateOf<MediaController?>(null) }
     var current by remember { mutableStateOf<Song?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
+    LaunchedEffect(isPlaying) { PlaybackBridge.isPlayingNow = isPlaying }
     var shuffle by remember { mutableStateOf(false) }
     var repeatMode by remember { mutableIntStateOf(Player.REPEAT_MODE_OFF) }
     var position by remember { mutableLongStateOf(0L) }
@@ -670,6 +671,7 @@ fun MusicApp(
             Box(Modifier.fillMaxSize().swipeBack { albumPage = null }.then(sheetMod).background(p.bgBrush)) {
                 SongListPage(
                     title = list.firstOrNull()?.album ?: "Album",
+                    stretchHeader = true,
                     subtitle = "${list.size} songs · ${list.firstOrNull()?.artist.orEmpty()}",
                     songs = list, current = current, favSet = favSet, p = p,
                     showDuration = showDuration, topPad = topPad, bottomPad = bottomPad,
@@ -696,6 +698,7 @@ fun MusicApp(
             ) {
                 SongListPage(
                     title = name,
+                    stretchHeader = true,
                     subtitle = "${list.size} songs",
                     songs = list,
                     current = current,

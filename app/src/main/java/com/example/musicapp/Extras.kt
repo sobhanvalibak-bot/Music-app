@@ -26,6 +26,9 @@ import java.util.Locale
 object PlaybackBridge {
     @Volatile
     var audioSessionId: Int = 0
+
+    /** True while music is playing; lets any row show a live equalizer without extra parameters. */
+    var isPlayingNow by mutableStateOf(false)
 }
 
 object SleepTimer {

@@ -382,8 +382,22 @@ fun TopIsland(
         animationSpec = spring(dampingRatio = 0.62f, stiffness = 300f),
         label = "islandT"
     )
-    val width = androidx.compose.ui.unit.lerp(islandWidthDp.dp, 340.dp, t)
-    val height = androidx.compose.ui.unit.lerp(pillH, 168.dp, t)
+    // when the song changes the compact pill briefly swells, like the real Dynamic Island
+    val bump = remember { Animatable(0f) }
+    var firstSong by remember { mutableStateOf(true) }
+    LaunchedEffect(song.id) {
+        if (firstSong) {
+            firstSong = false
+        } else {
+            bump.snapTo(0f)
+            bump.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 260f))
+            kotlinx.coroutines.delay(900)
+            bump.animateTo(0f, spring(dampingRatio = 0.7f, stiffness = 220f))
+        }
+    }
+    val bumpNow = (bump.value * (1f - t)).coerceAtLeast(0f)
+    val width = androidx.compose.ui.unit.lerp(islandWidthDp.dp, 340.dp, t) + 44.dp * bumpNow
+    val height = androidx.compose.ui.unit.lerp(pillH, 168.dp, t) + 8.dp * bumpNow
     val corner = androidx.compose.ui.unit.lerp(pillH / 2, 34.dp, t.coerceIn(0f, 1f))
     val shape = RoundedCornerShape(corner)
 

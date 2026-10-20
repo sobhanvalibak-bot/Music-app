@@ -235,12 +235,14 @@ fun Cover(
     // (this is what keeps the mini player cover in sync with the playing track).
     val cacheKey = "${song.id}_$px"
     var art by remember(cacheKey) { mutableStateOf<ImageBitmap?>(artCache.get(cacheKey)) }
+    var loading by remember(cacheKey) { mutableStateOf(art == null) }
     LaunchedEffect(cacheKey) {
         if (art == null) {
             val loaded = loadArt(context, song, px)
             if (loaded != null) artCache.put(cacheKey, loaded)
             art = loaded
         }
+        loading = false
     }
     val shape: Shape = if (round) CircleShape else RoundedCornerShape(radius * p.corner)
     Box(
@@ -260,6 +262,7 @@ fun Cover(
             )
         } else {
             GlyphIcon(Glyph.Note, p.secondary.copy(alpha = 0.7f), Modifier.fillMaxSize(0.4f))
+            if (loading) ShimmerOverlay(Modifier.fillMaxSize())
         }
     }
 }
