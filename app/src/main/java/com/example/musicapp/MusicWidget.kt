@@ -80,6 +80,9 @@ object MusicWidget {
         }.start()
     }
 
+    private fun rid(context: Context, name: String, type: String): Int =
+        context.resources.getIdentifier(name, type, context.packageName)
+
     /** Draws the widget from the last saved state (also used when the app is not running). */
     fun render(context: Context) {
         val mgr = AppWidgetManager.getInstance(context)
@@ -91,23 +94,26 @@ object MusicWidget {
         val playing = st.getBoolean("playing", false)
         val tint = st.getInt("tint", DEFAULT_TINT)
 
-        val v = RemoteViews(context.packageName, R.layout.widget_player)
-        v.setTextViewText(R.id.w_title, title.ifBlank { "Music App" })
-        v.setTextViewText(R.id.w_artist, artist.ifBlank { "Tap to open" })
+        // Resources are looked up by name, so a missing widget layout can never break the build.
+        val layoutId = rid(context, "widget_player", "layout")
+        if (layoutId == 0) return
+        val v = RemoteViews(context.packageName, layoutId)
+        v.setTextViewText(rid(context, "w_title", "id"), title.ifBlank { "Music App" })
+        v.setTextViewText(rid(context, "w_artist", "id"), artist.ifBlank { "Tap to open" })
         v.setImageViewResource(
-            R.id.w_play,
+            rid(context, "w_play", "id"),
             if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
         )
-        v.setInt(R.id.w_tint, "setColorFilter", tint)
+        v.setInt(rid(context, "w_tint", "id"), "setColorFilter", tint)
 
         val coverFile = File(context.filesDir, COVER_FILE)
         val cover = if (coverFile.exists()) BitmapFactory.decodeFile(coverFile.absolutePath) else null
-        if (cover != null) v.setImageViewBitmap(R.id.w_cover, cover)
-        else v.setImageViewResource(R.id.w_cover, R.mipmap.ic_launcher)
+        if (cover != null) v.setImageViewBitmap(rid(context, "w_cover", "id"), cover)
+        else v.setImageViewResource(rid(context, "w_cover", "id"), rid(context, "ic_launcher", "mipmap"))
 
-        v.setOnClickPendingIntent(R.id.w_play, broadcast(context, ACTION_PLAY_PAUSE, 1))
-        v.setOnClickPendingIntent(R.id.w_next, broadcast(context, ACTION_NEXT, 2))
-        v.setOnClickPendingIntent(R.id.w_prev, broadcast(context, ACTION_PREV, 3))
+        v.setOnClickPendingIntent(rid(context, "w_play", "id"), broadcast(context, ACTION_PLAY_PAUSE, 1))
+        v.setOnClickPendingIntent(rid(context, "w_next", "id"), broadcast(context, ACTION_NEXT, 2))
+        v.setOnClickPendingIntent(rid(context, "w_prev", "id"), broadcast(context, ACTION_PREV, 3))
         val open = Intent(context, MainActivity::class.java).apply {
             action = ACTION_OPEN_PLAYER
             addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -115,9 +121,9 @@ object MusicWidget {
         val openPi = PendingIntent.getActivity(
             context, 10, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        v.setOnClickPendingIntent(R.id.w_cover, openPi)
-        v.setOnClickPendingIntent(R.id.w_title, openPi)
-        v.setOnClickPendingIntent(R.id.w_artist, openPi)
+        v.setOnClickPendingIntent(rid(context, "w_cover", "id"), openPi)
+        v.setOnClickPendingIntent(rid(context, "w_title", "id"), openPi)
+        v.setOnClickPendingIntent(rid(context, "w_artist", "id"), openPi)
         mgr.updateAppWidget(ids, v)
     }
 

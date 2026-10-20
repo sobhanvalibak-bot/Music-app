@@ -284,10 +284,10 @@ fun SongsTab(
     ) {
         item {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().staggerIn(0), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("DISCOVER YOUR SOUND", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = p.accent, letterSpacing = 1.5.sp)
-                        Text("Discover", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = p.text)
+                        Text(greetingNow().uppercase(), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = p.accent, letterSpacing = 1.5.sp)
+                        Text("Home", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = p.text)
                         Text("${songs.size} tracks · $sortSubtitle", fontSize = 13.sp, color = p.secondary)
                     }
                     Box(Modifier.size(44.dp).clip(CircleShape).background(p.selectedPill), contentAlignment = Alignment.Center) {
@@ -297,22 +297,53 @@ fun SongsTab(
                 Spacer(Modifier.height(16.dp))
                 val featured = current ?: songs.firstOrNull()
                 if (featured != null) {
-                    Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
-                            .background(Brush.linearGradient(listOf(p.accent.copy(alpha = 0.30f), p.card, p.card)))
-                            .clickable { onPlay(songs.indexOfFirst { it.id == featured.id }.coerceAtLeast(0)) }
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    val isNow = current != null && current.id == featured.id
+                    Box(
+                        Modifier.fillMaxWidth().height(214.dp)
+                            .staggerIn(1)
+                            .bounceClick { onPlay(songs.indexOfFirst { it.id == featured.id }.coerceAtLeast(0)) }
+                            .clip(RoundedCornerShape(28.dp))
                     ) {
-                        Cover(featured, Modifier.size(88.dp), 16.dp, p, 400)
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(if (current != null) "NOW PLAYING" else "TODAY’S PICK", fontSize = 10.sp, color = p.accent, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                            Spacer(Modifier.height(4.dp))
-                            Text(featured.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = p.text)
-                            Text(featured.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = p.secondary)
-                            Spacer(Modifier.height(8.dp))
-                            Text(if (current != null && current.id == featured.id) "Open player  ›" else "Play track  ›", color = p.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        // the cover fills the card and drifts a little slower than the list (parallax)
+                        Cover(
+                            featured,
+                            Modifier.fillMaxSize().graphicsLayer {
+                                val off = if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset.toFloat() else 0f
+                                scaleX = 1.15f
+                                scaleY = 1.15f
+                                translationY = off * 0.18f
+                            },
+                            0.dp, p, 700
+                        )
+                        Box(
+                            Modifier.matchParentSize().background(
+                                Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f)), startY = 120f)
+                            )
+                        )
+                        Column(Modifier.align(Alignment.BottomStart).padding(start = 18.dp, end = 80.dp, bottom = 16.dp)) {
+                            Text(
+                                if (isNow) "NOW PLAYING" else "TODAY’S PICK",
+                                fontSize = 11.sp, color = Color.White.copy(alpha = 0.85f),
+                                fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp
+                            )
+                            Text(
+                                featured.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color.White
+                            )
+                            Text(
+                                featured.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                fontSize = 14.sp, color = Color.White.copy(alpha = 0.8f)
+                            )
+                        }
+                        Box(
+                            Modifier.align(Alignment.BottomEnd).padding(16.dp).size(48.dp)
+                                .clip(CircleShape).background(Color.White.copy(alpha = 0.92f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            GlyphIcon(
+                                if (isNow && PlaybackBridge.isPlayingNow) Glyph.Pause else Glyph.Play,
+                                Color.Black, Modifier.size(22.dp)
+                            )
                         }
                     }
                 }
@@ -325,14 +356,15 @@ fun SongsTab(
                     Spacer(Modifier.height(10.dp))
                     // Magazine-style discovery grid using real local tracks, not fabricated online recommendations.
                     Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                        songs.take(4).chunked(2).forEach { pair ->
+                        songs.take(4).chunked(2).forEachIndexed { pairIdx, pair ->
                             Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                                pair.forEach { pick ->
+                                pair.forEachIndexed { k, pick ->
                                     Row(
                                         Modifier.weight(1f).height(66.dp)
+                                            .staggerIn(2 + pairIdx * 2 + k)
+                                            .bounceClick { onPlay(songs.indexOfFirst { it.id == pick.id }.coerceAtLeast(0)) }
                                             .clip(RoundedCornerShape(15.dp))
                                             .background(Brush.linearGradient(listOf(p.accent.copy(alpha = 0.20f), p.card)))
-                                            .clickable { onPlay(songs.indexOfFirst { it.id == pick.id }.coerceAtLeast(0)) }
                                             .padding(7.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
@@ -358,7 +390,7 @@ fun SongsTab(
                     Spacer(Modifier.height(10.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(end = 4.dp)) {
                         items(recentlyPlayed.take(12), key = { "recent-${it.id}" }) { recent ->
-                            Column(Modifier.width(116.dp).clickable { onPlay(songs.indexOfFirst { it.id == recent.id }.coerceAtLeast(0)) }) {
+                            Column(Modifier.width(116.dp).bounceClick { onPlay(songs.indexOfFirst { it.id == recent.id }.coerceAtLeast(0)) }) {
                                 Cover(recent, Modifier.size(116.dp), 16.dp, p, 300)
                                 Spacer(Modifier.height(7.dp))
                                 Text(recent.title, color = p.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -394,7 +426,7 @@ fun SongsTab(
             )
         }
     }
-    CollapsingBar("Discover", titleProg, p, topPad, Modifier.align(Alignment.TopStart))
+    CollapsingBar("Home", titleProg, p, topPad, Modifier.align(Alignment.TopStart))
     if (showIndex && songs.size > 20) {
         AlphabetIndex(
             p = p,
@@ -703,7 +735,16 @@ fun ProfileTab(
     val context = LocalContext.current
     val favSongs = profile.favorites.reversed().mapNotNull { byId[it] }
 
-    LazyColumn(contentPadding = PaddingValues(top = topPad, bottom = bottomPad)) {
+    val listState = rememberLazyListState()
+    val profFadePx = with(LocalDensity.current) { 150.dp.toPx() }
+    val barProg by remember {
+        derivedStateOf {
+            if (listState.firstVisibleItemIndex > 0) 1f
+            else (listState.firstVisibleItemScrollOffset / profFadePx).coerceIn(0f, 1f)
+        }
+    }
+    Box(Modifier.fillMaxSize()) {
+    LazyColumn(state = listState, contentPadding = PaddingValues(top = topPad, bottom = bottomPad)) {
         item {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 20.dp),
@@ -717,14 +758,14 @@ fun ProfileTab(
         item {
             // Banner and profile picture are one block: the picture sits on the bottom edge of the banner.
             Column(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 8.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 8.dp).staggerIn(0),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                     if (profile.bannerVideoPath.isNotBlank()) {
-                        LoopingProfileVideo(profile.bannerVideoPath, Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(18.dp)))
+                        LoopingProfileVideo(profile.bannerVideoPath, Modifier.fillMaxWidth().height(150.dp).scrollParallax(listState, 0.35f).clip(RoundedCornerShape(18.dp)))
                     } else {
-                        Box(Modifier.fillMaxWidth().height(110.dp).glass(RoundedCornerShape(18.dp), p), contentAlignment = Alignment.Center) {
+                        Box(Modifier.fillMaxWidth().height(110.dp).scrollParallax(listState, 0.35f).glass(RoundedCornerShape(18.dp), p), contentAlignment = Alignment.Center) {
                             Text("Profile banner", color = p.secondary)
                         }
                     }
@@ -733,6 +774,7 @@ fun ProfileTab(
                         Modifier
                             .padding(top = if (profile.bannerVideoPath.isNotBlank()) 94.dp else 54.dp)
                             .size(120.dp)
+                            .scrollParallax(listState, 0.35f, 0.4f)
                             .clip(CircleShape)
                             .background(p.bg)
                             .padding(5.dp)
@@ -769,14 +811,14 @@ fun ProfileTab(
                     Modifier
                         .clip(RoundedCornerShape(50))
                         .background(p.selectedPill)
-                        .clickable { onEdit() }
+                        .bounceClick { onEdit() }
                         .padding(horizontal = 28.dp, vertical = 10.dp)
                 ) { Text("Edit profile", color = p.text, fontWeight = FontWeight.Medium) }
             }
         }
         item {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).staggerIn(1),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 ProfileAction("Settings", "Manage media", p, Modifier.weight(1f), onSettings)
@@ -785,7 +827,7 @@ fun ProfileTab(
         }
         item {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp).staggerIn(2),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 listOf(
@@ -800,7 +842,7 @@ fun ProfileTab(
                             .padding(vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text("$n", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = p.text)
+                        Text("${rememberCountUp(n)}", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = p.text)
                         Text(label, fontSize = 12.sp, color = p.secondary)
                     }
                 }
@@ -900,6 +942,8 @@ fun ProfileTab(
                 }
             }
         }
+    }
+    CollapsingBar(profile.name.ifBlank { "Profile" }, barProg, p, topPad, Modifier.align(Alignment.TopStart))
     }
 }
 
