@@ -137,7 +137,7 @@ class Settings(private val prefs: SharedPreferences) {
     var opaqueClassic by mutableStateOf(prefs.getBoolean("opaque_classic", false)); private set
     var corners by mutableFloatStateOf(prefs.getFloat("corners", 1f)); private set
     var showDuration by mutableStateOf(prefs.getBoolean("duration", true)); private set
-    /** 0 = classic glass mini player, 1 = Dynamic Island (black pill) */
+    /** 0 = classic glass mini player, 1 = Dynamic Island (black pill), 2 = small pill at the top centre */
     var miniStyle by mutableIntStateOf(prefs.getInt("mini_style", 0)); private set
     /** Crossfade between songs in seconds, 0 = off (read by PlaybackService from the same prefs). */
     var crossfade by mutableIntStateOf(prefs.getInt("crossfade", 0)); private set
@@ -300,6 +300,16 @@ class ProfileStore(private val context: Context) {
             playlists[i] = playlists[i].copy(songIds = playlists[i].songIds - songId)
             savePlaylists()
         }
+    }
+
+    fun movePlaylistSong(playlistId: String, from: Int, to: Int) {
+        val i = playlists.indexOfFirst { it.id == playlistId }
+        if (i < 0) return
+        val ids = playlists[i].songIds.toMutableList()
+        if (from !in ids.indices || to !in ids.indices || from == to) return
+        ids.add(to, ids.removeAt(from))
+        playlists[i] = playlists[i].copy(songIds = ids)
+        savePlaylists()
     }
 
     fun deletePlaylist(playlistId: String) {

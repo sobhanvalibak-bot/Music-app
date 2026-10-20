@@ -5,6 +5,13 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.zIndex
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -112,19 +119,25 @@ fun SongRow(
     onLong: (() -> Unit)? = null,
     onRemove: (() -> Unit)? = null,
     onPlayNext: (() -> Unit)? = null,
-    onEditInfo: (() -> Unit)? = null
+    onEditInfo: (() -> Unit)? = null,
+    dragModifier: Modifier? = null
 ) {
     var sheetOpen by remember(song.id) { mutableStateOf(false) }
     val haptic = LocalHapticFeedback.current
     Row(
         Modifier
             .fillMaxWidth()
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    sheetOpen = true
-                }
+            .then(
+                if (dragModifier != null) {
+                    // long-press + drag reorders the song instead of opening the menu
+                    Modifier.clickable { onClick() }.then(dragModifier)
+                } else Modifier.combinedClickable(
+                    onClick = onClick,
+                    onLongClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        sheetOpen = true
+                    }
+                )
             )
             .padding(start = 20.dp, end = 8.dp, top = 7.dp, bottom = 7.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -397,9 +410,35 @@ fun PlaylistPage(
     onPlay: (Int) -> Unit,
     onToggleFav: (Song) -> Unit,
     onRemove: (Song) -> Unit,
+    onPlayNext: () -> Unit,
+    onSongPlayNext: (Song) -> Unit,
+    onMove: (from: Int, to: Int) -> Unit,
     onDelete: () -> Unit
 ) {
-    LazyColumn(contentPadding = PaddingValues(top = topPad, bottom = bottomPad)) {
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    val headerItems = 2 // BackBar + header
+    // local order used while dragging; saved when the finger lifts
+    var local by remember(songs.map { it.id }) { mutableStateOf(songs) }
+    var draggedId by remember { mutableStateOf<Long?>(null) }
+    var dragOffset by remember { mutableStateOf(0f) }
+    var startIndex by remember { mutableStateOf(-1) }
+
+    fun finishDrag(commit: Boolean) {
+        val id = draggedId
+        if (commit && id != null) {
+            val end = local.indexOfFirst { it.id == id }
+            if (startIndex >= 0 && end >= 0 && end != startIndex) onMove(startIndex, end)
+        } else {
+            local = songs
+        }
+        draggedId = null
+        dragOffset = 0f
+        startIndex = -1
+    }
+
+    LazyColumn(state = listState, contentPadding = PaddingValues(top = topPad, bottom = bottomPad)) {
         item { BackBar("Profile", p, onBack) }
         item {
             Column(
@@ -427,6 +466,13 @@ fun PlaylistPage(
                         Modifier
                             .clip(RoundedCornerShape(50))
                             .background(p.selectedPill)
+                            .clickable { onPlayNext() }
+                            .padding(horizontal = 20.dp, vertical = 11.dp)
+                    ) { Text("Play next", color = p.text, fontWeight = FontWeight.Medium) }
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(p.selectedPill)
                             .clickable { onDelete() }
                             .padding(horizontal = 24.dp, vertical = 11.dp)
                     ) { Text("Delete", color = p.text, fontWeight = FontWeight.Medium) }
@@ -442,17 +488,75 @@ fun PlaylistPage(
                 )
             }
         }
-        itemsIndexed(songs, key = { _, s -> s.id }) { index, song ->
-            SongRow(
-                song = song,
-                playing = current?.id == song.id,
-                p = p,
-                showDuration = showDuration,
-                fav = favSet.contains(song.id),
-                onClick = { onPlay(index) },
-                onFav = { onToggleFav(song) },
-                onRemove = { onRemove(song) }
-            )
+        itemsIndexed(local, key = { _, s -> s.id }) { index, song ->
+            val dragging = draggedId == song.id
+            val dragMod = Modifier.pointerInput(song.id) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        draggedId = song.id
+                        startIndex = local.indexOfFirst { it.id == song.id }
+                        dragOffset = 0f
+                    },
+                    onDrag = { change, amount ->
+                        change.consume()
+                        dragOffset += amount.y
+                        val info = listState.layoutInfo
+                        val cur = info.visibleItemsInfo.firstOrNull { it.key == song.id }
+                        if (cur != null) {
+                            val center = cur.offset + cur.size / 2f + dragOffset
+                            val target = info.visibleItemsInfo.firstOrNull {
+                                it.key != song.id && it.index >= headerItems &&
+                                    center > it.offset && center < it.offset + it.size
+                            }
+                            if (target != null) {
+                                val from = cur.index - headerItems
+                                val to = target.index - headerItems
+                                val list = local.toMutableList()
+                                list.add(to, list.removeAt(from))
+                                local = list
+                                val newOffset = if (to > from) cur.offset + target.size else target.offset
+                                dragOffset += cur.offset - newOffset
+                            }
+                            // auto-scroll near the edges
+                            val top = cur.offset + dragOffset
+                            val bottom = top + cur.size
+                            when {
+                                top < info.viewportStartOffset + 40 -> scope.launch { listState.scrollBy(-24f) }
+                                bottom > info.viewportEndOffset - 40 -> scope.launch { listState.scrollBy(24f) }
+                            }
+                        }
+                    },
+                    onDragEnd = { finishDrag(true) },
+                    onDragCancel = { finishDrag(false) }
+                )
+            }
+            Box(
+                Modifier
+                    .zIndex(if (dragging) 1f else 0f)
+                    .graphicsLayer {
+                        if (dragging) {
+                            translationY = dragOffset
+                            scaleX = 1.03f
+                            scaleY = 1.03f
+                            shadowElevation = 24f
+                        }
+                    }
+                    .background(if (dragging) p.bg else Color.Transparent)
+            ) {
+                SongRow(
+                    song = song,
+                    playing = current?.id == song.id,
+                    p = p,
+                    showDuration = showDuration,
+                    fav = favSet.contains(song.id),
+                    onClick = { onPlay(index) },
+                    onFav = { onToggleFav(song) },
+                    onRemove = { onRemove(song) },
+                    onPlayNext = { onSongPlayNext(song) },
+                    dragModifier = dragMod
+                )
+            }
         }
     }
 }

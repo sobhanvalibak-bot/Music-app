@@ -131,10 +131,12 @@ fun SettingsTab(
         }
         item {
             SettingsCard("Mini player style", p) {
-                Segmented(listOf("Classic", "Dynamic Island"), settings.miniStyle, p) { settings.changeMiniStyle(it) }
+                Segmented(listOf("Classic", "Dynamic Island", "Top"), settings.miniStyle, p) { settings.changeMiniStyle(it) }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    if (settings.miniStyle == 1)
+                    if (settings.miniStyle == 2)
+                        "A small black pill at the top centre: round cover and the song title. A long title scrolls in a loop and pauses each time it is back at the start. Tap to open the player."
+                    else if (settings.miniStyle == 1)
                         "A black pill like the iPhone's Dynamic Island: small cover, live sound bars, play and next."
                     else
                         "The glass card with cover, favorite, play and next buttons.",

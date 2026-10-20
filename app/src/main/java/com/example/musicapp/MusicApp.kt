@@ -73,12 +73,26 @@ fun MusicApp(
                 PackageManager.PERMISSION_GRANTED
         )
     }
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted = it }
+    var askNoticeAccess by remember { mutableStateOf(false) }
     val notifLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { }
+    ) {
+        // after the notification permission: ask for access to read other apps' notifications (island)
+        if (!isNoticeAccessEnabled(context)) askNoticeAccess = true
+    }
+    fun askNotifications() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        else if (!isNoticeAccessEnabled(context)) askNoticeAccess = true
+    }
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        granted = it
+        askNotifications() // one dialog after the other, never together
+    }
     val photoPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri -> if (uri != null) scope.launch { profile.savePhoto(uri) } }
@@ -126,13 +140,23 @@ fun MusicApp(
         }
     }
 
-    LaunchedEffect(granted) {
-        if (granted && Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
+    // On start: music permission first (if missing), then notifications.
+    LaunchedEffect(Unit) {
+        if (!granted) launcher.launch(audioPermission) else askNotifications()
+    }
+
+    if (askNoticeAccess) {
+        NoticeAccessDialog(
+            p = p,
+            onOpenSettings = {
+                askNoticeAccess = false
+                context.startActivity(
+                    android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            },
+            onLater = { askNoticeAccess = false }
+        )
     }
 
     var tab by remember { mutableIntStateOf(0) }
@@ -323,6 +347,16 @@ fun MusicApp(
         Toast.makeText(context, "Will play next: ${song.title}", Toast.LENGTH_SHORT).show()
     }
 
+    // Whole list goes right after the current song.
+    fun queueNextAll(list: List<Song>) {
+        val c = controller ?: return
+        if (list.isEmpty()) return
+        if (c.mediaItemCount == 0) { playQueue(list, 0); return }
+        val insertAt = (c.currentMediaItemIndex + 1).coerceAtLeast(0)
+        c.addMediaItems(insertAt, list.map { it.toMediaItem() })
+        Toast.makeText(context, "Playlist will play next (${list.size} songs)", Toast.LENGTH_SHORT).show()
+    }
+
     // "Cover" theme: take the colour from the cover of the song that is playing.
     LaunchedEffect(current?.id, settings.theme) {
         if (settings.theme == 3) onTint(current?.let { songTint(context, it) })
@@ -469,6 +503,9 @@ fun MusicApp(
                                 onPlay = { i -> playQueue(plSongs, i) },
                                 onToggleFav = { profile.toggleFavorite(it.id) },
                                 onRemove = { profile.removeFromPlaylist(pl.id, it.id) },
+                                onPlayNext = { queueNextAll(plSongs) },
+                                onSongPlayNext = { queueNext(it) },
+                                onMove = { from, to -> profile.movePlaylistSong(pl.id, from, to) },
                                 onDelete = {
                                     sub = Sub.None
                                     profile.deletePlaylist(pl.id)
@@ -578,7 +615,7 @@ fun MusicApp(
                 .padding(bottom = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            current?.let { song ->
+            current?.takeIf { settings.miniStyle != 2 }?.let { song ->
                 Box(
                     Modifier
                         .zIndex(1f) // always above the tab row, so it keeps taking touches
@@ -660,6 +697,33 @@ fun MusicApp(
                     searching = true
                 }
             }
+        }
+
+        // Notification arrives: the island drops lower, shows the app icon and the app name
+        val notice = NoticeBus.current
+        var shownNotice by remember { mutableStateOf<Notice?>(null) }
+        LaunchedEffect(notice) { if (notice != null) shownNotice = notice }
+
+        // Top island: small pill at the top centre (mini player style 3)
+        if (settings.miniStyle == 2) {
+            current?.let { song ->
+                AnimatedVisibility(
+                    visible = notice == null,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier.align(Alignment.TopCenter)
+                ) {
+                    TopIsland(song = song, p = p, onOpen = { showPlayer = true })
+                }
+            }
+        }
+        AnimatedVisibility(
+            visible = notice != null,
+            enter = slideInVertically(spring(dampingRatio = 0.7f, stiffness = 300f)) { -it * 2 } + fadeIn(),
+            exit = slideOutVertically { -it * 2 } + fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter).zIndex(2f)
+        ) {
+            shownNotice?.let { NoticeIsland(it, onDismiss = { NoticeBus.dismiss() }) }
         }
 
         // Full player

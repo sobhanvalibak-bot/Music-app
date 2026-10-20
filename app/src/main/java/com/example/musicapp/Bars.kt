@@ -10,7 +10,10 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.MarqueeSpacing
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -567,4 +570,83 @@ fun SearchButton(active: Boolean, p: Palette, onClick: () -> Unit) {
 fun formatTime(ms: Long): String {
     val s = ms / 1000
     return "%d:%02d".format(s / 60, s % 60)
+}
+
+
+/**
+ * Small minimal pill at the top centre of the screen (Dynamic Island place).
+ * Round cover on the left, song title next to it. A long title scrolls round in a loop
+ * and stops for a moment each time it is back at the start. Tap opens the full player.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun TopIsland(
+    song: Song,
+    p: Palette,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    val statusH = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
+    val pillH = 34.dp
+    val top = ((statusH - pillH) / 2).coerceAtLeast(4.dp)
+    val shape = RoundedCornerShape(50)
+
+    // pops a little each time the song changes
+    val pop = remember { Animatable(1f) }
+    LaunchedEffect(song.id) {
+        pop.snapTo(1.08f)
+        pop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 380f))
+    }
+    var pressed by remember { mutableStateOf(false) }
+    val press by animateFloatAsState(
+        if (pressed) 1f else 0f, spring(dampingRatio = 0.6f, stiffness = 500f), label = "topIslandPress"
+    )
+    val onOpenS by rememberUpdatedState(onOpen)
+
+    Box(modifier.fillMaxWidth().padding(top = top), contentAlignment = Alignment.TopCenter) {
+        Row(
+            Modifier
+                .graphicsLayer {
+                    val sc = pop.value * (1f - 0.04f * press)
+                    scaleX = sc
+                    scaleY = sc
+                }
+                .height(pillH)
+                .clip(shape)
+                .background(Color.Black)
+                .border(1.dp, Color.White.copy(alpha = 0.10f), shape)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onPress = { pressed = true; tryAwaitRelease(); pressed = false },
+                        onTap = { onOpenS() }
+                    )
+                }
+                .padding(start = 4.dp, end = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Cover(song, Modifier.size(26.dp), 0.dp, p, 200, round = true)
+            Spacer(Modifier.width(8.dp))
+            // restart the scroll from the start for every new song
+            key(song.id) {
+                Text(
+                    song.title,
+                    maxLines = 1,
+                    softWrap = false,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                    modifier = Modifier
+                        .widthIn(max = 150.dp)
+                        .basicMarquee(
+                            iterations = Int.MAX_VALUE,
+                            initialDelayMillis = 1500,
+                            delayMillis = 1500,   // pause every time the title is back at the start
+                            spacing = MarqueeSpacing(28.dp),
+                            velocity = 40.dp
+                        )
+                )
+            }
+        }
+    }
 }
