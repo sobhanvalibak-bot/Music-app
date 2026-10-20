@@ -109,6 +109,11 @@ class NoticeListenerService : NotificationListenerService() {
     }
 }
 
+private fun Bitmap.toImageBitmap(size: Int): ImageBitmap {
+    val scaled = if (width == size && height == size) this else Bitmap.createScaledBitmap(this, size, size, true)
+    return scaled.asImageBitmap()
+}
+
 private fun Drawable.toImageBitmap(size: Int): ImageBitmap {
     val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val c = Canvas(bmp)

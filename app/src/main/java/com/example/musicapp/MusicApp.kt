@@ -696,10 +696,15 @@ fun MusicApp(
                     profileName = profile.name,
                     classic = classicTabs
                 )
-                SearchButton(active = searching, p = p, classic = classicTabs) {
-                    barsVisible = true
-                    searching = true
-                }
+                SearchButton(
+                    active = searching,
+                    p = p,
+                    onClick = {
+                        barsVisible = true
+                        searching = true
+                    },
+                    classic = classicTabs
+                )
             }
         }
 
