@@ -137,6 +137,8 @@ class Settings(private val prefs: SharedPreferences) {
     var opaqueClassic by mutableStateOf(prefs.getBoolean("opaque_classic", false)); private set
     var corners by mutableFloatStateOf(prefs.getFloat("corners", 1f)); private set
     var showDuration by mutableStateOf(prefs.getBoolean("duration", true)); private set
+    /** 0 = classic glass mini player, 1 = Dynamic Island (black pill) */
+    var miniStyle by mutableIntStateOf(prefs.getInt("mini_style", 0)); private set
 
     fun changeTheme(v: Int) { theme = v; prefs.edit().putInt("theme", v).apply() }
     fun changeAccent(v: Int) { accent = v; prefs.edit().putInt("accent", v).apply() }
@@ -145,6 +147,7 @@ class Settings(private val prefs: SharedPreferences) {
     fun changeOpaqueClassic(v: Boolean) { opaqueClassic = v; prefs.edit().putBoolean("opaque_classic", v).apply() }
     fun changeCorners(v: Float) { corners = v; prefs.edit().putFloat("corners", v).apply() }
     fun changeShowDuration(v: Boolean) { showDuration = v; prefs.edit().putBoolean("duration", v).apply() }
+    fun changeMiniStyle(v: Int) { miniStyle = v; prefs.edit().putInt("mini_style", v).apply() }
 }
 
 // ───────────────────────── Profile (stored on device) ─────────────────────────

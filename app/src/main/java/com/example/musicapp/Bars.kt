@@ -2,6 +2,11 @@ package com.example.musicapp
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -18,11 +23,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -58,9 +65,11 @@ fun MiniPlayer(
     onNext: () -> Unit,
     onPrev: () -> Unit,
     canNext: () -> Boolean,
-    onFav: () -> Unit
+    onFav: () -> Unit,
+    style: Int = 0
 ) {
-    val shape = RoundedCornerShape(24.dp)
+    val island = style == 1
+    val shape: Shape = if (island) RoundedCornerShape(50) else RoundedCornerShape(24.dp)
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
@@ -72,6 +81,15 @@ fun MiniPlayer(
         spring(dampingRatio = 0.6f, stiffness = 500f),
         label = "miniPress"
     )
+
+    // Dynamic Island: the pill "pops" a little each time the song changes
+    val pop = remember { Animatable(1f) }
+    LaunchedEffect(song.id) {
+        if (island) {
+            pop.snapTo(1.07f)
+            pop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 380f))
+        }
+    }
 
     val onOpenS by rememberUpdatedState(onOpen)
     val onNextS by rememberUpdatedState(onNext)
@@ -139,15 +157,28 @@ fun MiniPlayer(
                 translationX = offsetX.value
                 rotationZ = offsetX.value / screenPx * 5f
                 alpha = 1f - frac * 0.85f
-                val sc = 1f - 0.035f * press - 0.05f * frac
+                val sc = (1f - 0.035f * press - 0.05f * frac) * (if (island) pop.value else 1f)
                 scaleX = sc
                 scaleY = sc
             }
             .padding(horizontal = 14.dp)
-            .glass(shape, p)
-            .padding(horizontal = 8.dp, vertical = 7.dp),
+            .then(
+                if (island) Modifier
+                    .shadow(16.dp, shape, ambientColor = Color.Black.copy(alpha = 0.5f), spotColor = Color.Black.copy(alpha = 0.5f))
+                    .clip(shape)
+                    .background(Color.Black)
+                    .border(1.dp, Color.White.copy(alpha = 0.10f), shape)
+                    .padding(horizontal = 9.dp, vertical = 9.dp)
+                else Modifier
+                    .glass(shape, p)
+                    .padding(horizontal = 8.dp, vertical = 7.dp)
+            ),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (island) {
+            IslandContent(song, isPlaying, isFav, p, onToggle, onNext, onFav)
+            return@Row
+        }
         Cover(song, Modifier.size(42.dp), 11.dp, p, 300)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
@@ -185,12 +216,96 @@ fun MiniPlayer(
     }
 }
 
+/** Content of the Dynamic Island style mini player (everything sits on a black pill). */
+@Composable
+private fun RowScope.IslandContent(
+    song: Song,
+    isPlaying: Boolean,
+    isFav: Boolean,
+    p: Palette,
+    onToggle: () -> Unit,
+    onNext: () -> Unit,
+    onFav: () -> Unit
+) {
+    Cover(song, Modifier.size(42.dp), 0.dp, p, 300, round = true)
+    Spacer(Modifier.width(11.dp))
+    Column(Modifier.weight(1f)) {
+        Text(
+            song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White
+        )
+        Text(
+            song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f)
+        )
+    }
+    SoundBars(isPlaying, p.accent)
+    Spacer(Modifier.width(6.dp))
+    Box(
+        Modifier.size(36.dp).clip(CircleShape).clickable { onFav() },
+        contentAlignment = Alignment.Center
+    ) {
+        GlyphIcon(
+            if (isFav) Glyph.Heart else Glyph.HeartOutline,
+            if (isFav) p.accent else Color.White.copy(alpha = 0.7f),
+            Modifier.size(18.dp)
+        )
+    }
+    Box(
+        Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.14f)).clickable { onToggle() },
+        contentAlignment = Alignment.Center
+    ) {
+        GlyphIcon(if (isPlaying) Glyph.Pause else Glyph.Play, Color.White, Modifier.size(19.dp))
+    }
+    Box(
+        Modifier.size(38.dp).clip(CircleShape).clickable { onNext() },
+        contentAlignment = Alignment.Center
+    ) {
+        GlyphIcon(Glyph.Next, Color.White, Modifier.size(21.dp))
+    }
+}
+
+/** Little animated equalizer, like the live activity bars on the iPhone. */
+@Composable
+private fun SoundBars(playing: Boolean, color: Color) {
+    val t = rememberInfiniteTransition(label = "bars")
+    val periods = intArrayOf(520, 680, 450, 610)
+    val h = periods.mapIndexed { i, ms ->
+        t.animateFloat(
+            initialValue = 0.25f + 0.1f * i,
+            targetValue = 1f - 0.12f * i,
+            animationSpec = infiniteRepeatable(tween(ms, easing = LinearEasing), RepeatMode.Reverse),
+            label = "bar$i"
+        )
+    }
+    val rest by animateFloatAsState(if (playing) 1f else 0f, tween(300), label = "barsRest")
+    Row(
+        Modifier.height(18.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        h.forEach { st ->
+            Box(
+                Modifier
+                    .width(3.dp)
+                    .height(18.dp)
+                    .graphicsLayer {
+                        val f = 0.22f + (st.value - 0.22f) * rest
+                        scaleY = f.coerceAtLeast(0.18f)
+                    }
+                    .background(color, RoundedCornerShape(2.dp))
+            )
+        }
+    }
+}
+
 /**
- * Floating glass tab bar.
- *  - Tap a tab to switch. Pressing the bar lifts the highlight like iOS.
- *  - Just swipe left or right on the bar: the highlight follows your finger smoothly (liquid stretch),
- *    icons near it grow like a dock, and the tab changes live. Let go and it snaps in place.
- *  - [selected] = -1 means no tab is selected (the search page is open): the highlight fades out.
+ * iOS style floating tab bar (liquid glass).
+ *  - A glass capsule with a bigger profile photo.
+ *  - Hold the bar: the selected spot lifts into a glass lens that wraps the icon,
+ *    with a bright rim, a soft glow around it, and icons near it grow like a dock.
+ *  - Swipe left or right: the lens follows your finger (liquid stretch) and the tab changes live.
+ *  - [selected] = -1 means no tab is selected (the search page is open): the lens fades out.
  */
 @Composable
 fun GlassTabBar(
@@ -208,9 +323,11 @@ fun GlassTabBar(
         "Profile" to Glyph.Artist
     )
     val count = tabs.size
-    val shape = RoundedCornerShape(30.dp)
-    val density = LocalDensity.current
+    val barShape = RoundedCornerShape(40.dp)
+    val lensShape = RoundedCornerShape(34.dp)
     val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
+    val padPx = with(density) { BarPad.toPx() }
 
     val currentSelected by rememberUpdatedState(selected)
     val currentOnSelect by rememberUpdatedState(onSelect)
@@ -219,41 +336,39 @@ fun GlassTabBar(
     var pressed by remember { mutableStateOf(false) }
     var fingerX by remember { mutableFloatStateOf(0f) }
 
-    val itemW = if (widthState.intValue > 0) widthState.intValue.toFloat() / count else 0f
+    val innerW = (widthState.intValue - 2 * padPx).coerceAtLeast(0f)
+    val itemW = if (innerW > 0f) innerW / count else 0f
 
-    // Where the pill wants to be (in px): under the finger while dragging, else under the selected tab.
+    // where the lens wants to be, measured from the inner left edge
     val targetX = if (dragging && itemW > 0f)
-        (fingerX - itemW / 2f).coerceIn(0f, itemW * (count - 1))
+        (fingerX - padPx - itemW / 2f).coerceIn(0f, itemW * (count - 1))
     else selected.coerceAtLeast(0) * itemW
 
-    val pillX by animateFloatAsState(
+    val lensX by animateFloatAsState(
         targetX,
         if (dragging) spring(dampingRatio = 0.8f, stiffness = 900f)
         else spring(dampingRatio = 0.62f, stiffness = 420f),
-        label = "pillX"
+        label = "lensX"
     )
     val lift by animateFloatAsState(
         if (dragging || pressed) 1f else 0f,
-        spring(dampingRatio = 0.55f, stiffness = 380f),
+        spring(dampingRatio = 0.5f, stiffness = 330f),
         label = "lift"
     )
-    val pillAlpha by animateFloatAsState(
+    val lensAlpha by animateFloatAsState(
         if (selected >= 0) 1f else 0f,
         spring(dampingRatio = 1f, stiffness = 500f),
-        label = "pillAlpha"
+        label = "lensAlpha"
     )
 
     fun indexAt(x: Float): Int {
-        val w = widthState.intValue
-        if (w <= 0) return 0
-        return (x / (w.toFloat() / count)).toInt().coerceIn(0, count - 1)
+        if (itemW <= 0f) return 0
+        return ((x - padPx) / itemW).toInt().coerceIn(0, count - 1)
     }
 
     Box(
         modifier
-            .shadow(14.dp, shape, ambientColor = Color.Black.copy(alpha = 0.25f), spotColor = Color.Black.copy(alpha = 0.25f))
-            .glass(shape, p)
-            .padding(5.dp)
+            .height(BarHeight)
             .onSizeChanged { widthState.intValue = it.width }
             .pointerInput(Unit) {
                 detectTapGestures(
@@ -296,81 +411,115 @@ fun GlassTabBar(
                 )
             }
     ) {
-        // Liquid highlight
-        Box(Modifier.matchParentSize()) {
-            if (itemW > 0f) {
+        // 1) the glass capsule itself
+        Box(Modifier.matchParentSize().glass(barShape, p))
+
+        // 2) the lens: sits inside the bar, and lifts out of it while held
+        if (itemW > 0f) {
+            Box(
+                Modifier
+                    .padding(BarPad)
+                    .matchParentSize()
+            ) {
                 Box(
                     Modifier
-                        .offset { IntOffset(pillX.roundToInt(), 0) }
+                        .offset { IntOffset(lensX.roundToInt(), 0) }
                         .width(with(density) { itemW.toDp() })
                         .fillMaxHeight()
                         .graphicsLayer {
-                            alpha = pillAlpha
-                            // stretch a little while it is travelling, and lift when held
-                            val travel = (abs(targetX - pillX) / itemW).coerceAtMost(1f)
-                            scaleX = 1f + 0.10f * lift + 0.30f * travel
-                            scaleY = 1f + 0.10f * lift - 0.08f * travel
+                            alpha = lensAlpha
+                            val travel = (abs(targetX - lensX) / itemW).coerceAtMost(1f)
+                            // lens grows past the bar edges when held, stretches when travelling
+                            scaleX = 1f + 0.16f * lift + 0.30f * travel
+                            scaleY = 1f + 0.30f * lift - 0.08f * travel
+                            shadowElevation = 22.dp.toPx() * lift
+                            shape = lensShape
+                            clip = false
+                            ambientShadowColor = Color.Black.copy(alpha = 0.45f)
+                            spotShadowColor = Color.Black.copy(alpha = 0.45f)
                         }
-                        .clip(RoundedCornerShape(25.dp))
+                        .drawBehind {
+                            // soft glow that wraps around the lens while it is held
+                            if (lift > 0.01f) {
+                                drawCircle(
+                                    brush = Brush.radialGradient(
+                                        listOf(
+                                            p.accent.copy(alpha = 0.40f * lift),
+                                            Color.Transparent
+                                        ),
+                                        center = center,
+                                        radius = size.width * 0.95f
+                                    ),
+                                    radius = size.width * 0.95f,
+                                    center = center
+                                )
+                            }
+                        }
+                        .clip(lensShape)
                         .background(
                             Brush.verticalGradient(
                                 listOf(
-                                    p.accent.copy(alpha = 0.30f + 0.12f * lift),
-                                    p.accent.copy(alpha = 0.14f + 0.10f * lift)
+                                    Color.White.copy(alpha = (if (p.dark) 0.20f else 0.55f) + 0.20f * lift),
+                                    p.accent.copy(alpha = 0.10f + 0.10f * lift)
                                 )
                             )
                         )
                         .border(
-                            1.dp,
-                            Brush.verticalGradient(
-                                listOf(p.accent.copy(alpha = 0.7f), p.accent.copy(alpha = 0.15f))
+                            1.2.dp,
+                            Brush.linearGradient(
+                                listOf(
+                                    Color.White.copy(alpha = 0.55f + 0.45f * lift),
+                                    Color.White.copy(alpha = 0.08f),
+                                    Color.White.copy(alpha = 0.30f + 0.40f * lift)
+                                )
                             ),
-                            RoundedCornerShape(25.dp)
+                            lensShape
                         )
                 )
             }
         }
 
-        Row(Modifier.fillMaxWidth()) {
+        // 3) icons and labels
+        Row(Modifier.fillMaxSize().padding(horizontal = BarPad)) {
             tabs.forEachIndexed { i, (label, glyph) ->
                 val sel = i == selected
                 val tint by animateColorAsState(if (sel) p.accent else p.secondary, label = "tint")
                 Column(
-                    Modifier
-                        .weight(1f)
-                        .padding(vertical = 7.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                    Modifier.weight(1f).fillMaxHeight(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
                     Box(
                         Modifier
-                            .size(22.dp)
+                            .size(34.dp)
                             .graphicsLayer {
-                                // dock-style magnification: the closer to the pill, the bigger
+                                // dock-style magnification: the closer to the lens, the bigger
                                 val centre = i * itemW
-                                val d = if (itemW > 0f) abs(centre - pillX) / itemW else 1f
-                                val near = (1f - d).coerceIn(0f, 1f) * pillAlpha
-                                val sc = 1f + (0.12f + 0.16f * lift) * near
+                                val d = if (itemW > 0f) abs(centre - lensX) / itemW else 1f
+                                val near = (1f - d).coerceIn(0f, 1f) * lensAlpha
+                                val sc = 1f + (0.08f + 0.20f * lift) * near
                                 scaleX = sc
                                 scaleY = sc
-                                translationY = -3.dp.toPx() * near * (0.4f + 0.6f * lift)
-                            }
+                                translationY = -4.dp.toPx() * near * lift
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
                         if (i == 3) {
-                            // The Profile tab shows the user's own photo.
+                            // Profile tab: the user's own photo, bigger than the other icons
                             Avatar(
                                 photo, profileName, p,
                                 Modifier
                                     .fillMaxSize()
-                                    .then(if (sel) Modifier.border(1.5.dp, p.accent, CircleShape) else Modifier),
-                                10.sp
+                                    .then(if (sel) Modifier.border(2.dp, p.accent, CircleShape) else Modifier),
+                                14.sp
                             )
                         } else {
-                            GlyphIcon(glyph, tint, Modifier.fillMaxSize())
+                            GlyphIcon(glyph, tint, Modifier.size(26.dp))
                         }
                     }
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(3.dp))
                     Text(
-                        label, fontSize = 10.sp,
+                        label, fontSize = 10.5.sp,
                         fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
                         color = tint, maxLines = 1
                     )
@@ -379,6 +528,9 @@ fun GlassTabBar(
         }
     }
 }
+
+val BarHeight = 72.dp
+private val BarPad = 6.dp
 
 /** Round glass search button that sits next to the tab bar (like the iOS tab bar). */
 @Composable
@@ -393,7 +545,7 @@ fun SearchButton(active: Boolean, p: Palette, onClick: () -> Unit) {
     val onClickS by rememberUpdatedState(onClick)
     Box(
         Modifier
-            .size(60.dp)
+            .size(BarHeight)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -412,7 +564,7 @@ fun SearchButton(active: Boolean, p: Palette, onClick: () -> Unit) {
             },
         contentAlignment = Alignment.Center
     ) {
-        GlyphIcon(Glyph.Search, tint, Modifier.size(24.dp))
+        GlyphIcon(Glyph.Search, tint, Modifier.size(26.dp))
     }
 }
 

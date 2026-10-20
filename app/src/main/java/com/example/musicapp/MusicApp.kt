@@ -16,6 +16,9 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.zIndex
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -167,19 +170,28 @@ fun MusicApp(
 
     // While typing in search the keyboard needs the space, so the bars slide away too.
     val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-    val barsShown = barsVisible && !(searching && imeOpen)
+    val barsShown = barsVisible
 
-    // Mini player and tab bar slide down off the screen and come back up with a spring.
-    val miniHide by animateFloatAsState(
-        if (barsShown) 0f else 1f,
-        spring(dampingRatio = 0.8f, stiffness = 260f),
-        label = "miniHide"
-    )
+    // Scrolling down: only the tab bar (and search button) fades out, and the mini player glides
+    // down into the place the tab bar had. The mini player itself never fades.
     val tabHide by animateFloatAsState(
         if (barsShown) 0f else 1f,
         spring(dampingRatio = 0.85f, stiffness = 380f),
         label = "tabHide"
     )
+    val miniDock by animateFloatAsState(
+        if (barsShown) 0f else 1f,
+        spring(dampingRatio = 0.78f, stiffness = 300f),
+        label = "miniDock"
+    )
+    // while typing in search the keyboard needs the space: everything slides away
+    val imeHide by animateFloatAsState(
+        if (searching && imeOpen) 1f else 0f,
+        spring(dampingRatio = 0.8f, stiffness = 260f),
+        label = "imeHide"
+    )
+    var tabRowH by remember { mutableIntStateOf(0) }
+    var miniH by remember { mutableIntStateOf(0) }
 
     if (!granted) {
         Column(
@@ -365,7 +377,7 @@ fun MusicApp(
 
     val topPad = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 8.dp
     val bottomPad = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() +
-        (if (current != null) 150.dp else 96.dp)
+        (if (current != null) 164.dp else 104.dp)
     val sortSubtitle = SortSubtitles[settings.sort.coerceIn(0, 2)]
     val showDuration = settings.showDuration
 
@@ -549,10 +561,15 @@ fun MusicApp(
         ) {
             current?.let { song ->
                 Box(
-                    Modifier.graphicsLayer {
-                        translationY = miniHide * (size.height + 160.dp.toPx())
-                        alpha = 1f
-                    }
+                    Modifier
+                        .zIndex(1f) // always above the tab row, so it keeps taking touches
+                        .onSizeChanged { miniH = it.height }
+                        .graphicsLayer {
+                            // centre of the mini player moves onto the centre of the tab row
+                            val toTabs = 8.dp.toPx() + (miniH + tabRowH) / 2f
+                            translationY = miniDock * toTabs + imeHide * (size.height + 200.dp.toPx())
+                            alpha = 1f
+                        }
                 ) {
                     MiniPlayer(
                         song = song,
@@ -572,17 +589,35 @@ fun MusicApp(
                             }
                         },
                         canNext = { controller?.hasNextMediaItem() == true },
-                        onFav = { profile.toggleFavorite(song.id) }
+                        onFav = { profile.toggleFavorite(song.id) },
+                        style = settings.miniStyle
                     )
                 }
             }
+            val tabsHidden = !barsShown
             Row(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp)
+                    .onSizeChanged { tabRowH = it.height }
                     .graphicsLayer {
-                        translationY = tabHide * (size.height + 120.dp.toPx())
-                        alpha = 1f - tabHide * 0.5f
+                        // only fades (with a tiny shrink), it does not slide away
+                        alpha = (1f - tabHide) * (1f - imeHide)
+                        val sc = 1f - 0.05f * tabHide
+                        scaleX = sc
+                        scaleY = sc
+                        translationY = imeHide * (size.height + 120.dp.toPx())
+                    }
+                    // a faded tab bar must not take touches
+                    .pointerInput(tabsHidden) {
+                        if (tabsHidden) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    awaitPointerEvent(PointerEventPass.Initial)
+                                        .changes.forEach { it.consume() }
+                                }
+                            }
+                        }
                     },
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically

@@ -497,32 +497,40 @@ fun ProfileTab(
             }
         }
         item {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                if (profile.bannerVideoPath.isNotBlank()) {
-                    LoopingProfileVideo(profile.bannerVideoPath, Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(18.dp)))
-                } else {
-                    Box(Modifier.fillMaxWidth().height(72.dp).glass(RoundedCornerShape(18.dp), p), contentAlignment = Alignment.Center) {
-                        Text("Profile banner", color = p.secondary)
-                    }
-                }
-                // Profile media is managed from Settings only.
-            }
-        }
-        item {
+            // Banner and profile picture are one block: the picture sits on the bottom edge of the banner.
             Column(
-                Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (profile.avatarVideoPath.isNotBlank()) {
-                    LoopingProfileVideo(profile.avatarVideoPath, Modifier.size(112.dp).clip(CircleShape))
-                } else {
-                    Avatar(
-                        photo = profile.photo,
-                        name = profile.name,
-                        p = p,
-                        modifier = Modifier.size(112.dp),
-                        textSize = 42.sp
-                    )
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                    if (profile.bannerVideoPath.isNotBlank()) {
+                        LoopingProfileVideo(profile.bannerVideoPath, Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(18.dp)))
+                    } else {
+                        Box(Modifier.fillMaxWidth().height(110.dp).glass(RoundedCornerShape(18.dp), p), contentAlignment = Alignment.Center) {
+                            Text("Profile banner", color = p.secondary)
+                        }
+                    }
+                    // the ring in the page colour cuts the picture out of the banner
+                    Box(
+                        Modifier
+                            .padding(top = if (profile.bannerVideoPath.isNotBlank()) 94.dp else 54.dp)
+                            .size(120.dp)
+                            .clip(CircleShape)
+                            .background(p.bg)
+                            .padding(5.dp)
+                    ) {
+                        if (profile.avatarVideoPath.isNotBlank()) {
+                            LoopingProfileVideo(profile.avatarVideoPath, Modifier.fillMaxSize().clip(CircleShape))
+                        } else {
+                            Avatar(
+                                photo = profile.photo,
+                                name = profile.name,
+                                p = p,
+                                modifier = Modifier.fillMaxSize(),
+                                textSize = 42.sp
+                            )
+                        }
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(

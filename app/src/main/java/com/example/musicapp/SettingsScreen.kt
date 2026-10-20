@@ -130,6 +130,19 @@ fun SettingsTab(
             }
         }
         item {
+            SettingsCard("Mini player style", p) {
+                Segmented(listOf("Classic", "Dynamic Island"), settings.miniStyle, p) { settings.changeMiniStyle(it) }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    if (settings.miniStyle == 1)
+                        "A black pill like the iPhone's Dynamic Island: small cover, live sound bars, play and next."
+                    else
+                        "The glass card with cover, favorite, play and next buttons.",
+                    fontSize = 13.sp, color = p.secondary
+                )
+            }
+        }
+        item {
             SettingsCard("Accent color", p) {
                 Row(
                     Modifier.fillMaxWidth(),
