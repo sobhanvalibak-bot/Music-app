@@ -1,5 +1,7 @@
 package com.example.musicapp
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -41,29 +43,45 @@ fun SettingsCard(title: String, p: Palette, content: @Composable ColumnScope.() 
 
 @Composable
 fun Segmented(options: List<String>, selected: Int, p: Palette, onSelect: (Int) -> Unit) {
-    Row(
+    val n = options.size.coerceAtLeast(1)
+    BoxWithConstraints(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(p.selectedPill)
             .padding(3.dp)
     ) {
-        options.forEachIndexed { i, label ->
-            val sel = i == selected
-            Box(
-                Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (sel) p.segment else Color.Transparent)
-                    .clickable { onSelect(i) }
-                    .padding(vertical = 9.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    label, fontSize = 14.sp,
-                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
-                    color = p.text
-                )
+        val segW = maxWidth / n
+        // the highlighted pill slides to the chosen option with a small spring
+        val x by animateDpAsState(
+            segW * selected.coerceIn(0, n - 1),
+            spring(dampingRatio = 0.75f, stiffness = 500f), label = "segPill"
+        )
+        Box(
+            Modifier
+                .offset(x = x)
+                .width(segW)
+                .height(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(p.segment)
+        )
+        Row(Modifier.fillMaxWidth()) {
+            options.forEachIndexed { i, label ->
+                val sel = i == selected
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onSelect(i) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        label, fontSize = 14.sp,
+                        fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                        color = p.text
+                    )
+                }
             }
         }
     }
@@ -206,7 +224,7 @@ fun SettingsTab(
                         Text("Show notifications", color = p.text, fontWeight = FontWeight.Medium)
                         Text("Show a cover preview when a notification arrives", color = p.secondary, fontSize = 12.sp)
                     }
-                    Switch(checked = settings.noticeEnabled, onCheckedChange = { settings.changeNoticeEnabled(it); NoticeBus.showTest(if (it) "Notification previews enabled." else "Notification previews disabled.") })
+                    IosSwitch(p, checked = settings.noticeEnabled, onCheckedChange = { settings.changeNoticeEnabled(it); NoticeBus.showTest(if (it) "Notification previews enabled." else "Notification previews disabled.") })
                 }
                 Spacer(Modifier.height(12.dp))
                 Text("Panel size", color = p.text, fontSize = 13.sp)
@@ -269,10 +287,9 @@ fun SettingsTab(
                         Text("Skip silence", fontSize = 15.sp, color = p.text)
                         Text("Jumps over silent parts inside a song", fontSize = 12.sp, color = p.secondary)
                     }
-                    Switch(
+                    IosSwitch(p, 
                         checked = settings.skipSilence,
-                        onCheckedChange = { settings.changeSkipSilence(it) },
-                        colors = SwitchDefaults.colors(checkedTrackColor = p.accent)
+                        onCheckedChange = { settings.changeSkipSilence(it) }
                     )
                 }
             }
@@ -320,10 +337,9 @@ fun SettingsTab(
             SettingsCard("Song list", p) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Show song duration", Modifier.weight(1f), fontSize = 16.sp, color = p.text)
-                    Switch(
+                    IosSwitch(p, 
                         checked = settings.showDuration,
-                        onCheckedChange = { settings.changeShowDuration(it) },
-                        colors = SwitchDefaults.colors(checkedTrackColor = p.accent)
+                        onCheckedChange = { settings.changeShowDuration(it) }
                     )
                 }
             }

@@ -10,6 +10,9 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -42,6 +45,7 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.zIndex
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
@@ -107,9 +111,22 @@ fun FullPlayer(
     onPlayQueueItem: (Int) -> Unit,
     onRemoveQueueItem: (Int) -> Unit,
     onMoveQueueItem: (Int, Int) -> Unit,
-    onClearUpcoming: () -> Unit
+    onClearUpcoming: () -> Unit,
+    sleepActive: Boolean = false,
+    sleepEndOfSong: Boolean = false,
+    sleepLeftMs: Long = 0L,
+    onSleepPick: (Int) -> Unit = {}
 ) {
     val context = LocalContext.current
+    var showSleep by remember { mutableStateOf(false) }
+    var showVolume by remember { mutableStateOf(false) }
+    var volumeTouch by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(showVolume, volumeTouch) {
+        if (showVolume) {
+            delay(3000)
+            showVolume = false
+        }
+    }
     var showQueue by remember { mutableStateOf(false) }
     var showAlbum by remember { mutableStateOf(false) }
     var showLyrics by remember { mutableStateOf(false) }
@@ -325,6 +342,8 @@ fun FullPlayer(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 PlayerIconButton(Glyph.Tune, if (kotlin.math.abs(speed - 1f) < 0.01f) fg else p.accent, 46.dp, 24.dp, onClick = { showOptions = true })
+                PlayerIconButton(Glyph.Moon, if (sleepActive || sleepEndOfSong) p.accent else fg, 46.dp, 22.dp, onClick = { showSleep = true })
+                PlayerIconButton(Glyph.Volume, if (showVolume) p.accent else fg, 46.dp, 24.dp, onClick = { showVolume = !showVolume })
                 Spacer(Modifier.weight(1f))
                 PlayerIconButton(Glyph.Share, fg, 46.dp, 24.dp, onClick = {
                     try {
@@ -431,6 +450,29 @@ fun FullPlayer(
                 onSpeed = onSpeed,
                 info = audioInfo,
                 onClose = { showOptions = false }
+            )
+        }
+
+        // big pill volume slider on the right edge
+        AnimatedVisibility(
+            visible = showVolume,
+            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 16.dp),
+            enter = fadeIn(tween(120)) + scaleIn(
+                spring(dampingRatio = 0.65f, stiffness = 420f),
+                initialScale = 0.7f, transformOrigin = TransformOrigin(1f, 0.5f)
+            ),
+            exit = fadeOut(tween(120)) + scaleOut(tween(140), targetScale = 0.8f, transformOrigin = TransformOrigin(1f, 0.5f))
+        ) {
+            VolumePill(onTouch = { volumeTouch = System.nanoTime() })
+        }
+
+        if (showSleep) {
+            SleepTimerSheet(
+                active = sleepActive,
+                endOfSong = sleepEndOfSong,
+                leftMs = sleepLeftMs,
+                onPick = onSleepPick,
+                onDismiss = { showSleep = false }
             )
         }
     }

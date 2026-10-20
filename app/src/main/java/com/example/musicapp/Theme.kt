@@ -266,7 +266,7 @@ fun Cover(
 
 // ───────────────────────── Icons (drawn, no extra deps) ─────────────────────────
 
-enum class Glyph { Note, Album, Artist, Tune, Play, Pause, Next, Heart, HeartOutline, Back, Close, Plus, Prev, Shuffle, Repeat, ChevronDown, Edit, Search, Queue, Share, More, PlusCircle, Speaker }
+enum class Glyph { Note, Album, Artist, Tune, Play, Pause, Next, Heart, HeartOutline, Back, Close, Plus, Prev, Shuffle, Repeat, ChevronDown, Edit, Search, Queue, Share, More, PlusCircle, Speaker, Moon, Volume }
 
 @Composable
 fun GlyphIcon(glyph: Glyph, color: Color, modifier: Modifier = Modifier) {
@@ -447,6 +447,21 @@ fun GlyphIcon(glyph: Glyph, color: Color, modifier: Modifier = Modifier) {
                 drawCircle(color, radius = w * 0.44f, center = Offset(w * 0.5f, h * 0.5f), style = Stroke(sw))
                 drawLine(color, Offset(w * 0.5f, h * 0.28f), Offset(w * 0.5f, h * 0.72f), sw, StrokeCap.Round)
                 drawLine(color, Offset(w * 0.28f, h * 0.5f), Offset(w * 0.72f, h * 0.5f), sw, StrokeCap.Round)
+            }
+            Glyph.Moon -> {
+                val a = Path().apply { addOval(androidx.compose.ui.geometry.Rect(Offset(w * 0.46f, h * 0.54f), w * 0.36f)) }
+                val b = Path().apply { addOval(androidx.compose.ui.geometry.Rect(Offset(w * 0.64f, h * 0.38f), w * 0.30f)) }
+                drawPath(Path.combine(androidx.compose.ui.graphics.PathOperation.Difference, a, b), color)
+            }
+            Glyph.Volume -> {
+                val sw = w * 0.08f
+                val body = Path().apply {
+                    moveTo(w * 0.14f, h * 0.38f); lineTo(w * 0.32f, h * 0.38f); lineTo(w * 0.52f, h * 0.20f)
+                    lineTo(w * 0.52f, h * 0.80f); lineTo(w * 0.32f, h * 0.62f); lineTo(w * 0.14f, h * 0.62f); close()
+                }
+                drawPath(body, color)
+                drawArc(color, -45f, 90f, false, Offset(w * 0.34f, h * 0.30f), GSize(w * 0.40f, h * 0.40f), style = Stroke(sw, cap = StrokeCap.Round))
+                drawArc(color, -45f, 90f, false, Offset(w * 0.24f, h * 0.18f), GSize(w * 0.62f, h * 0.64f), style = Stroke(sw, cap = StrokeCap.Round))
             }
             Glyph.Speaker -> {
                 val sw = w * 0.07f

@@ -8,6 +8,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.SystemClock
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -378,7 +379,66 @@ fun MusicApp(
         if (c.mediaItemCount == 0) { playQueue(list, 0); return }
         val insertAt = (c.currentMediaItemIndex + 1).coerceAtLeast(0)
         c.addMediaItems(insertAt, list.map { it.toMediaItem() })
-        Toast.makeText(context, "Playlist will play next (${list.size} songs)", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "Will play next (${list.size} songs)", Toast.LENGTH_SHORT).show()
+    }
+
+    // ── Sleep timer: stops the music after a time (with a fade) or at the end of the song ──
+    var sleepEndAt by remember { mutableStateOf<Long?>(null) }
+    var sleepEndOfSong by remember { mutableStateOf(false) }
+    var sleepLeftMs by remember { mutableLongStateOf(0L) }
+    fun resetVolume() { try { controller?.volume = 1f } catch (_: Exception) { } }
+    fun startSleep(minutes: Int) {
+        resetVolume()
+        when {
+            minutes == 0 -> {
+                sleepEndAt = null
+                sleepEndOfSong = false
+                Toast.makeText(context, "Sleep timer off", Toast.LENGTH_SHORT).show()
+            }
+            minutes < 0 -> {
+                sleepEndAt = null
+                sleepEndOfSong = true
+                Toast.makeText(context, "Music will stop after this song", Toast.LENGTH_SHORT).show()
+            }
+            else -> {
+                sleepEndOfSong = false
+                sleepLeftMs = minutes * 60_000L
+                sleepEndAt = SystemClock.elapsedRealtime() + sleepLeftMs
+                Toast.makeText(context, "Sleep timer: $minutes min", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    LaunchedEffect(sleepEndAt) {
+        val end = sleepEndAt ?: return@LaunchedEffect
+        while (true) {
+            val left = end - SystemClock.elapsedRealtime()
+            sleepLeftMs = left.coerceAtLeast(0L)
+            if (left <= 0L) break
+            // the last 10 seconds fade out
+            if (left < 10_000L) {
+                try { controller?.volume = (left / 10_000f).coerceIn(0f, 1f) } catch (_: Exception) { }
+            }
+            delay(if (left < 10_000L) 100L else 500L)
+        }
+        controller?.pause()
+        resetVolume()
+        sleepEndAt = null
+        Toast.makeText(context, "Sleep timer finished", Toast.LENGTH_SHORT).show()
+    }
+    LaunchedEffect(sleepEndOfSong) {
+        if (!sleepEndOfSong) return@LaunchedEffect
+        while (true) {
+            val c = controller
+            if (c != null && c.isPlaying) {
+                val d = c.duration
+                if (d > 0 && d - c.currentPosition <= 700L) {
+                    c.pause()
+                    sleepEndOfSong = false
+                    break
+                }
+            }
+            delay(250)
+        }
     }
 
     // Derive the player palette from the playing cover even when the app-wide theme is fixed.
@@ -466,8 +526,21 @@ fun MusicApp(
     val menuBlur by animateDpAsState(if (menuOpen) 18.dp else 0.dp, tween(260), label = "menuBlur")
     val blurMod = if (menuBlur > 0.dp) Modifier.blur(menuBlur) else Modifier
 
+    // while the full player is open, the screen behind it shrinks and rounds, like an iOS sheet
+    val sheetOn = showPlayer && current != null
+    val sheetScale by animateFloatAsState(
+        if (sheetOn) 0.92f else 1f, spring(dampingRatio = 0.85f, stiffness = 350f), label = "sheetScale"
+    )
+    val sheetCorner by animateDpAsState(if (sheetOn) 24.dp else 0.dp, tween(260), label = "sheetCorner")
+    val sheetMod = Modifier.graphicsLayer {
+        scaleX = sheetScale
+        scaleY = sheetScale
+        shape = RoundedCornerShape(sheetCorner)
+        clip = sheetScale < 0.999f
+    }
+
     Box(Modifier.fillMaxSize().nestedScroll(barsScroll)) {
-        Crossfade(targetState = tab, modifier = blurMod, label = "tabs") { t ->
+        Crossfade(targetState = tab, modifier = blurMod.then(sheetMod), label = "tabs") { t ->
             if (t == 3) {
                 when (val s = sub) {
                     is Sub.None -> ProfileTab(
@@ -482,9 +555,13 @@ fun MusicApp(
                         onFavorites = { sub = Sub.Favorites },
                         onOpenPlaylist = { sub = Sub.PlaylistPage(it) },
                         onNewPlaylist = { showNewPlaylist = true },
-                        onPlayFavorites = { list, i -> playQueue(list, i) }
+                        onPlayFavorites = { list, i -> playQueue(list, i) },
+                        onPlayList = { playQueue(it, 0) },
+                        onPlayNextList = { queueNextAll(it) },
+                        onShuffleList = { playQueue(it.shuffled(), 0) },
+                        onSongPlayNext = { queueNext(it) }
                     )
-                    is Sub.Settings -> SettingsTab(
+                    is Sub.Settings -> Box(Modifier.fillMaxSize().swipeBack { sub = Sub.None }.background(p.bgBrush)) { SettingsTab(
                         settings = settings,
                         p = p,
                         topPad = topPad,
@@ -496,9 +573,10 @@ fun MusicApp(
                         onPickAvatarVideo = { avatarVideoPicker.launch("video/mp4") },
                         onPickBannerVideo = { bannerVideoPicker.launch("video/mp4") },
                         onBack = { sub = Sub.None }
-                    )
+                    ) }
                     is Sub.Favorites -> {
                         val favSongs = profile.favorites.reversed().mapNotNull { byId[it] }
+                        Box(Modifier.fillMaxSize().swipeBack { sub = Sub.None }.background(p.bgBrush)) {
                         SongListPage(
                             title = "Favorites",
                             subtitle = "${favSongs.size} songs",
@@ -517,11 +595,13 @@ fun MusicApp(
                             onPlayNext = { queueNext(it) },
                             onEditInfo = { editTarget = it }
                         )
+                        }
                     }
                     is Sub.PlaylistPage -> {
                         val pl = profile.playlists.firstOrNull { it.id == s.id }
                         if (pl != null) {
                             val plSongs = pl.songIds.mapNotNull { byId[it] }
+                            Box(Modifier.fillMaxSize().swipeBack { sub = Sub.None }.background(p.bgBrush)) {
                             PlaylistPage(
                                 playlist = pl,
                                 songs = plSongs,
@@ -543,6 +623,7 @@ fun MusicApp(
                                     profile.deletePlaylist(pl.id)
                                 }
                             )
+                            }
                         }
                     }
                 }
@@ -565,16 +646,28 @@ fun MusicApp(
                     onToggleFav = { profile.toggleFavorite(it.id) },
                     onLong = { addTarget = it },
                     onPlayNext = { queueNext(it) },
-                    onEditInfo = { editTarget = it }
+                    onEditInfo = { editTarget = it },
+                    showIndex = settings.sort == 2,
+                    onOpenSearch = { searching = true }
                 )
-                1 -> AlbumsTab(albums, p, sortSubtitle, topPad, bottomPad) { list -> albumPage = list }
-                else -> ArtistsTab(artists, p, topPad, bottomPad) { g -> artistPage = g.name }
+                1 -> AlbumsTab(
+                    albums, p, sortSubtitle, topPad, bottomPad,
+                    onPlayAll = { playQueue(it, 0) },
+                    onPlayNext = { queueNextAll(it) },
+                    onShuffle = { playQueue(it.shuffled(), 0) }
+                ) { list -> albumPage = list }
+                else -> ArtistsTab(
+                    artists, p, topPad, bottomPad,
+                    onPlayAll = { playQueue(it, 0) },
+                    onPlayNext = { queueNextAll(it) },
+                    onShuffle = { playQueue(it.shuffled(), 0) }
+                ) { g -> artistPage = g.name }
             }
         }
 
         // Album detail: opening an album browses its tracks without starting playback.
         albumPage?.let { list ->
-            Box(Modifier.fillMaxSize().background(p.bgBrush)) {
+            Box(Modifier.fillMaxSize().swipeBack { albumPage = null }.then(sheetMod).background(p.bgBrush)) {
                 SongListPage(
                     title = list.firstOrNull()?.album ?: "Album",
                     subtitle = "${list.size} songs · ${list.firstOrNull()?.artist.orEmpty()}",
@@ -596,6 +689,8 @@ fun MusicApp(
             Box(
                 Modifier
                     .fillMaxSize()
+                    .swipeBack { artistPage = null }
+                    .then(sheetMod)
                     .background(p.bgBrush)
                     .pointerInput(Unit) { detectTapGestures { } }
             ) {
@@ -832,6 +927,9 @@ fun MusicApp(
         // Full player
         AnimatedVisibility(
             visible = showPlayer && current != null,
+            modifier = Modifier
+                .padding(top = 12.dp)
+                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)),
             enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
             exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
         ) {
@@ -916,7 +1014,11 @@ fun MusicApp(
                                     .forEach { c.removeMediaItem(it) }
                             }
                         }
-                    }
+                    },
+                    sleepActive = sleepEndAt != null,
+                    sleepEndOfSong = sleepEndOfSong,
+                    sleepLeftMs = sleepLeftMs,
+                    onSleepPick = { startSleep(it) }
                 )
             }
         }

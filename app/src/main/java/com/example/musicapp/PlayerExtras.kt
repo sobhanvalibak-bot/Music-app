@@ -507,10 +507,9 @@ fun PlaybackOptionsPanel(
                     Text("Skip silence", fontSize = 16.sp, color = p.text)
                     Text("Jumps over silent parts inside a song", fontSize = 12.sp, color = p.secondary)
                 }
-                Switch(
+                IosSwitch(p, 
                     checked = settings.skipSilence,
-                    onCheckedChange = { settings.changeSkipSilence(it) },
-                    colors = SwitchDefaults.colors(checkedTrackColor = p.accent)
+                    onCheckedChange = { settings.changeSkipSilence(it) }
                 )
             }
 

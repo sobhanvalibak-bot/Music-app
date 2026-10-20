@@ -55,6 +55,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
@@ -78,32 +85,27 @@ fun shareSong(context: Context, song: Song) {
 }
 
 /**
- * The menu that opens from the three dots of a song and from a long press.
- * iOS style: the pressed row lifts, the app behind it blurs, and the same frosted menu as the
- * Dynamic Island opens right under the row (or above it when there is no room below).
+ * Generic iOS style context menu overlay: the pressed item lifts, the app behind it blurs and the
+ * frosted menu springs open next to it (under the item, or above it when there is no room below).
  *
- * [anchor] = bounds of the pressed row on the screen (null: the menu opens near the top).
+ * [anchor] = bounds of the pressed item on the screen (null: the menu opens near the top).
+ * [preview] draws the lifted copy of the item. [buildGroups] gets a `close` function: call
+ * `close { action }` to close with a short animation and then run the action.
  */
 @Composable
-fun SongActionSheet(
-    song: Song,
-    fav: Boolean,
+fun ContextMenuOverlay(
     p: Palette,
+    anchor: Rect?,
     onDismiss: () -> Unit,
-    onFav: () -> Unit,
-    onPlayNext: (() -> Unit)?,
-    onAddToPlaylist: (() -> Unit)?,
-    onEditInfo: (() -> Unit)?,
-    onRemove: (() -> Unit)?,
-    anchor: Rect? = null
+    previewRadius: Dp = 16.dp,
+    preview: @Composable () -> Unit,
+    buildGroups: (close: ((() -> Unit)?) -> Unit) -> List<List<MenuAction>>
 ) {
-    val context = LocalContext.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { shown = true }
 
-    // close with a short animation, then run the chosen action
     fun close(action: (() -> Unit)? = null) {
         scope.launch {
             shown = false
@@ -138,19 +140,28 @@ fun SongActionSheet(
         var rootH by remember { mutableIntStateOf(0) }
         var menuH by remember { mutableIntStateOf(0) }
         val scrim by animateFloatAsState(if (shown) 1f else 0f, tween(180), label = "menuScrim")
+        // the lifted item grows with a spring, like the iPhone
+        val lift by animateFloatAsState(
+            if (shown) 1.04f else 1f,
+            spring(dampingRatio = 0.55f, stiffness = 380f), label = "menuLift"
+        )
 
-        // pressed row, in the coordinates of this dialog
         val fallbackTop = rootH * 0.22f
         val rowH = anchor?.height ?: with(density) { 70.dp.toPx() }
         val rowTop = if (anchor != null) anchor.top - originY else fallbackTop
         val rowLeft = if (anchor != null) anchor.left - originX else 0f
         val rowW = if (anchor != null) anchor.width else rootW.toFloat()
         val gap = with(density) { 10.dp.toPx() }
+        val margin = with(density) { 20.dp.toPx() }
+        val menuW = with(density) { 240.dp.toPx() }
         val bottomLimit = rootH - with(density) { 28.dp.toPx() }
         val below = rowTop + rowH + gap + menuH <= bottomLimit
         val menuTop = if (below) rowTop + rowH + gap else (rowTop - gap - menuH).coerceAtLeast(with(density) { 8.dp.toPx() })
-        val menuLeft = with(density) { 20.dp.toPx() }
-        val origin = TransformOrigin(0.1f, if (below) 0f else 1f)
+        val menuLeft = rowLeft.coerceIn(margin, (rootW - menuW - margin).coerceAtLeast(margin))
+        // small items (album, artist card) grow the menu from the item, wide rows from the left
+        val originFx = if (rowW > menuW * 1.5f) 0.1f
+        else (((rowLeft + rowW / 2f) - menuLeft) / menuW).coerceIn(0.1f, 0.9f)
+        val origin = TransformOrigin(originFx, if (below) 0f else 1f)
 
         Box(
             Modifier
@@ -166,41 +177,131 @@ fun SongActionSheet(
                 .background(Color.Black.copy(alpha = (if (p.dark) 0.30f else 0.12f) * scrim))
                 .pointerInput(Unit) { detectTapGestures { close() } }
         ) {
-            // the pressed row, lifted
+            // the pressed item, lifted
             AnimatedVisibility(
                 visible = shown,
                 modifier = Modifier.offset { IntOffset(rowLeft.roundToInt(), rowTop.roundToInt()) },
-                enter = fadeIn(tween(120)) + scaleIn(spring(dampingRatio = 0.7f, stiffness = 420f), initialScale = 0.97f),
+                enter = fadeIn(tween(120)),
                 exit = fadeOut(tween(100))
             ) {
-                Row(
+                Box(
                     Modifier
                         .width(with(density) { rowW.toDp() })
                         .height(with(density) { rowH.toDp() })
-                        .graphicsLayer { scaleX = 1.03f; scaleY = 1.03f }
-                        .clip(RoundedCornerShape(16.dp))
+                        .graphicsLayer { scaleX = lift; scaleY = lift }
+                        .clip(RoundedCornerShape(previewRadius))
                         .background(p.card)
-                        .padding(horizontal = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Cover(song, Modifier.size(52.dp), 10.dp, p, 300)
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            fontSize = 16.sp, fontWeight = FontWeight.Medium, color = p.text
-                        )
-                        Text(
-                            song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            fontSize = 14.sp, color = p.secondary
-                        )
-                    }
-                }
+                ) { preview() }
             }
 
-            // the menu
-            val red = Color(0xFFFF3B30)
-            val groups = listOf(
+            val groups = buildGroups { a -> close(a) }.map { g -> g }.filter { it.isNotEmpty() }
+
+            AnimatedVisibility(
+                visible = shown,
+                modifier = Modifier.offset { IntOffset(menuLeft.roundToInt(), menuTop.roundToInt()) },
+                enter = fadeIn(tween(140)) + scaleIn(spring(dampingRatio = 0.72f, stiffness = 420f), initialScale = 0.82f, transformOrigin = origin),
+                exit = fadeOut(tween(100)) + scaleOut(tween(120), targetScale = 0.92f, transformOrigin = origin)
+            ) {
+                // hidden for the very first frame, until its height is known (to choose below/above)
+                Box(Modifier.graphicsLayer { alpha = if (menuH > 0) 1f else 0f }.onSizeChanged { menuH = it.height }) {
+                    IslandContextMenu(groups = groups, p = p)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Wraps any item: tap = [onClick], long press = the iOS style context menu with [groups].
+ * [content] is drawn in the list and again (lifted) inside the menu overlay.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun MenuTarget(
+    p: Palette,
+    onClick: () -> Unit,
+    groups: (close: ((() -> Unit)?) -> Unit) -> List<List<MenuAction>>,
+    modifier: Modifier = Modifier,
+    previewRadius: Dp = 16.dp,
+    content: @Composable () -> Unit
+) {
+    var open by remember { mutableStateOf(false) }
+    var anchor by remember { mutableStateOf<Rect?>(null) }
+    val coords = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    val view = LocalView.current
+    val haptic = LocalHapticFeedback.current
+    Box(
+        modifier
+            .onGloballyPositioned { coords[0] = it }
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    val c = coords[0]
+                    anchor = if (c != null && c.isAttached) {
+                        val b = c.boundsInWindow()
+                        val loc = IntArray(2)
+                        view.getLocationOnScreen(loc)
+                        Rect(b.left + loc[0], b.top + loc[1], b.right + loc[0], b.bottom + loc[1])
+                    } else null
+                    open = true
+                }
+            )
+    ) {
+        content()
+        if (open) {
+            ContextMenuOverlay(
+                p = p, anchor = anchor, onDismiss = { open = false },
+                previewRadius = previewRadius, preview = content, buildGroups = groups
+            )
+        }
+    }
+}
+
+/**
+ * The menu that opens from the three dots of a song and from a long press.
+ * [anchor] = bounds of the pressed row on the screen (null: the menu opens near the top).
+ */
+@Composable
+fun SongActionSheet(
+    song: Song,
+    fav: Boolean,
+    p: Palette,
+    onDismiss: () -> Unit,
+    onFav: () -> Unit,
+    onPlayNext: (() -> Unit)?,
+    onAddToPlaylist: (() -> Unit)?,
+    onEditInfo: (() -> Unit)?,
+    onRemove: (() -> Unit)?,
+    anchor: Rect? = null
+) {
+    val context = LocalContext.current
+    val red = Color(0xFFFF3B30)
+    ContextMenuOverlay(
+        p = p,
+        anchor = anchor,
+        onDismiss = onDismiss,
+        preview = {
+            Row(
+                Modifier.fillMaxSize().padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Cover(song, Modifier.size(52.dp), 10.dp, p, 300)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontSize = 16.sp, fontWeight = FontWeight.Medium, color = p.text
+                    )
+                    Text(
+                        song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontSize = 14.sp, color = p.secondary
+                    )
+                }
+            }
+        },
+        buildGroups = { close ->
+            listOf(
                 buildList<MenuAction> {
                     if (onPlayNext != null) add(MenuAction("Play next", Glyph.Next) { close { onPlayNext() } })
                     if (onAddToPlaylist != null) add(MenuAction("Add to playlist", Glyph.PlusCircle) { close { onAddToPlaylist() } })
@@ -218,19 +319,7 @@ fun SongActionSheet(
                 buildList<MenuAction> {
                     if (onRemove != null) add(MenuAction("Remove from this list", Glyph.Close, red) { close { onRemove() } })
                 }
-            ).filter { it.isNotEmpty() }
-
-            AnimatedVisibility(
-                visible = shown,
-                modifier = Modifier.offset { IntOffset(menuLeft.roundToInt(), menuTop.roundToInt()) },
-                enter = fadeIn(tween(140)) + scaleIn(spring(dampingRatio = 0.72f, stiffness = 420f), initialScale = 0.82f, transformOrigin = origin),
-                exit = fadeOut(tween(100)) + scaleOut(tween(120), targetScale = 0.92f, transformOrigin = origin)
-            ) {
-                // hidden for the very first frame, until its height is known (to choose below/above)
-                Box(Modifier.graphicsLayer { alpha = if (menuH > 0) 1f else 0f }.onSizeChanged { menuH = it.height }) {
-                    IslandContextMenu(groups = groups, p = p)
-                }
-            }
+            )
         }
-    }
+    )
 }

@@ -18,6 +18,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -38,6 +41,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.ContentScale
@@ -143,6 +147,10 @@ fun SongRow(
         } else null
         sheetOpen = true
     }
+    SwipeActionBox(
+        p = p, enabled = dragModifier == null, fav = fav,
+        onFav = onFav, onNext = onPlayNext
+    ) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -217,6 +225,7 @@ fun SongRow(
             }
         }
     }
+    }
 }
 
 @Composable
@@ -234,9 +243,29 @@ fun SongsTab(
     onToggleFav: (Song) -> Unit,
     onLong: (Song) -> Unit,
     onPlayNext: (Song) -> Unit = {},
-    onEditInfo: (Song) -> Unit = {}
+    onEditInfo: (Song) -> Unit = {},
+    showIndex: Boolean = false,
+    onOpenSearch: () -> Unit = {}
 ) {
-    LazyColumn(contentPadding = PaddingValues(top = topPad, bottom = bottomPad)) {
+    val density = LocalDensity.current
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val pullPx = with(density) { 90.dp.toPx() }
+    val fadePx = with(density) { 64.dp.toPx() }
+    val pull = rememberPullToSearch(pullPx, onOpenSearch)
+    val titleProg by remember {
+        derivedStateOf {
+            if (listState.firstVisibleItemIndex > 0) 1f
+            else (listState.firstVisibleItemScrollOffset / fadePx).coerceIn(0f, 1f)
+        }
+    }
+    Box(Modifier.fillMaxSize().nestedScroll(pull.connection)) {
+    PullSearchPill(pull, pullPx, topPad, p)
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.graphicsLayer { translationY = pull.pull.value },
+        contentPadding = PaddingValues(top = topPad, bottom = bottomPad)
+    ) {
         item {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -348,6 +377,19 @@ fun SongsTab(
                 onEditInfo = { onEditInfo(song) }
             )
         }
+    }
+    CollapsingBar("Discover", titleProg, p, topPad, Modifier.align(Alignment.TopStart))
+    if (showIndex && songs.size > 20) {
+        AlphabetIndex(
+            p = p,
+            onLetter = { letter ->
+                val idx = songs.indexOfFirst { indexKey(it.title) >= letter }
+                    .let { if (it < 0) songs.lastIndex else it }
+                scope.launch { listState.scrollToItem(idx + 1) }
+            },
+            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(0.62f).padding(end = 2.dp)
+        )
+    }
     }
 }
 
@@ -611,8 +653,13 @@ fun ProfileTab(
     onFavorites: () -> Unit,
     onOpenPlaylist: (String) -> Unit,
     onNewPlaylist: () -> Unit,
-    onPlayFavorites: (List<Song>, Int) -> Unit
+    onPlayFavorites: (List<Song>, Int) -> Unit,
+    onPlayList: (List<Song>) -> Unit,
+    onPlayNextList: (List<Song>) -> Unit,
+    onShuffleList: (List<Song>) -> Unit,
+    onSongPlayNext: (Song) -> Unit
 ) {
+    val context = LocalContext.current
     val favSongs = profile.favorites.reversed().mapNotNull { byId[it] }
 
     LazyColumn(contentPadding = PaddingValues(top = topPad, bottom = bottomPad)) {
@@ -732,19 +779,32 @@ fun ProfileTab(
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     itemsIndexed(favSongs.take(12), key = { _, s -> s.id }) { i, song ->
-                        Column(
-                            Modifier.width(118.dp).clickable { onPlayFavorites(favSongs, i) }
+                        MenuTarget(
+                            p = p,
+                            onClick = { onPlayFavorites(favSongs, i) },
+                            modifier = Modifier.width(118.dp),
+                            groups = { close ->
+                                listOf(
+                                    listOf(
+                                        MenuAction("Play next", Glyph.Next) { close { onSongPlayNext(song) } },
+                                        MenuAction("Remove favorite", Glyph.Heart) { close { profile.toggleFavorite(song.id) } }
+                                    ),
+                                    listOf(MenuAction("Share", Glyph.Share) { close { shareSong(context, song) } })
+                                )
+                            }
                         ) {
-                            Cover(song, Modifier.size(118.dp), 14.dp, p, 400)
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                fontSize = 14.sp, fontWeight = FontWeight.Medium, color = p.text
-                            )
-                            Text(
-                                song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                fontSize = 12.sp, color = p.secondary
-                            )
+                            Column(Modifier.padding(6.dp)) {
+                                Cover(song, Modifier.size(106.dp), 14.dp, p, 400)
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    fontSize = 14.sp, fontWeight = FontWeight.Medium, color = p.text
+                                )
+                                Text(
+                                    song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    fontSize = 12.sp, color = p.secondary
+                                )
+                            }
                         }
                     }
                 }
@@ -762,21 +822,40 @@ fun ProfileTab(
         }
         items(profile.playlists, key = { it.id }) { pl ->
             val plSongs = pl.songIds.mapNotNull { byId[it] }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenPlaylist(pl.id) }
-                    .padding(horizontal = 20.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                PlaylistArt(plSongs, Modifier.size(56.dp), 10.dp, p)
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        pl.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        fontSize = 16.sp, fontWeight = FontWeight.Medium, color = p.text
+            MenuTarget(
+                p = p,
+                onClick = { onOpenPlaylist(pl.id) },
+                modifier = Modifier.fillMaxWidth(),
+                groups = { close ->
+                    listOf(
+                        listOf(
+                            MenuAction("Play", Glyph.Play) { close { onPlayList(plSongs) } },
+                            MenuAction("Shuffle", Glyph.Shuffle) { close { onShuffleList(plSongs) } },
+                            MenuAction("Play next", Glyph.Next) { close { onPlayNextList(plSongs) } }
+                        ),
+                        listOf(
+                            MenuAction("Delete playlist", Glyph.Close, Color(0xFFFF3B30)) {
+                                close { profile.deletePlaylist(pl.id) }
+                            }
+                        )
                     )
-                    Text("${plSongs.size} songs", fontSize = 14.sp, color = p.secondary)
+                }
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 20.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    PlaylistArt(plSongs, Modifier.size(56.dp), 10.dp, p)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            pl.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            fontSize = 16.sp, fontWeight = FontWeight.Medium, color = p.text
+                        )
+                        Text("${plSongs.size} songs", fontSize = 14.sp, color = p.secondary)
+                    }
                 }
             }
         }
@@ -804,9 +883,22 @@ fun AlbumsTab(
     sortSubtitle: String,
     topPad: Dp,
     bottomPad: Dp,
+    onPlayAll: (List<Song>) -> Unit,
+    onPlayNext: (List<Song>) -> Unit,
+    onShuffle: (List<Song>) -> Unit,
     onPlay: (List<Song>) -> Unit
 ) {
+    val gridState = rememberLazyGridState()
+    val fadePx = with(LocalDensity.current) { 64.dp.toPx() }
+    val titleProg by remember {
+        derivedStateOf {
+            if (gridState.firstVisibleItemIndex > 0) 1f
+            else (gridState.firstVisibleItemScrollOffset / fadePx).coerceIn(0f, 1f)
+        }
+    }
+    Box(Modifier.fillMaxSize()) {
     LazyVerticalGrid(
+        state = gridState,
         columns = GridCells.Fixed(2),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = topPad, bottom = bottomPad),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -820,19 +912,37 @@ fun AlbumsTab(
         }
         gridItems(albums, key = { it.first().albumId }) { list ->
             val first = list.first()
-            Column(Modifier.clickable { onPlay(list) }) {
-                Cover(first, Modifier.fillMaxWidth().aspectRatio(1f), 16.dp, p, 700)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    first.album, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = p.text
-                )
-                Text(
-                    first.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    fontSize = 13.sp, color = p.secondary
-                )
+            MenuTarget(
+                p = p,
+                onClick = { onPlay(list) },
+                previewRadius = 20.dp,
+                groups = { close ->
+                    listOf(
+                        listOf(
+                            MenuAction("Play", Glyph.Play) { close { onPlayAll(list) } },
+                            MenuAction("Shuffle", Glyph.Shuffle) { close { onShuffle(list) } },
+                            MenuAction("Play next", Glyph.Next) { close { onPlayNext(list) } }
+                        ),
+                        listOf(MenuAction("Open album", Glyph.Album) { close { onPlay(list) } })
+                    )
+                }
+            ) {
+                Column(Modifier.padding(6.dp)) {
+                    Cover(first, Modifier.fillMaxWidth().aspectRatio(1f), 16.dp, p, 700)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        first.album, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = p.text
+                    )
+                    Text(
+                        first.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontSize = 13.sp, color = p.secondary
+                    )
+                }
             }
         }
+    }
+    CollapsingBar("Albums", titleProg, p, topPad, Modifier.align(Alignment.TopStart))
     }
 }
 
@@ -842,28 +952,57 @@ fun ArtistsTab(
     p: Palette,
     topPad: Dp,
     bottomPad: Dp,
+    onPlayAll: (List<Song>) -> Unit,
+    onPlayNext: (List<Song>) -> Unit,
+    onShuffle: (List<Song>) -> Unit,
     onOpen: (ArtistGroup) -> Unit
 ) {
-    LazyColumn(contentPadding = PaddingValues(top = topPad, bottom = bottomPad)) {
+    val listState = rememberLazyListState()
+    val fadePx = with(LocalDensity.current) { 64.dp.toPx() }
+    val titleProg by remember {
+        derivedStateOf {
+            if (listState.firstVisibleItemIndex > 0) 1f
+            else (listState.firstVisibleItemScrollOffset / fadePx).coerceIn(0f, 1f)
+        }
+    }
+    Box(Modifier.fillMaxSize()) {
+    LazyColumn(state = listState, contentPadding = PaddingValues(top = topPad, bottom = bottomPad)) {
         item { LargeTitle("Artists", "${artists.size} artists", p) }
         items(artists, key = { it.name.lowercase() }) { entry ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpen(entry) }
-                    .padding(horizontal = 20.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Cover(entry.songs.first(), Modifier.size(56.dp), 28.dp, p, 300, round = true)
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        entry.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        fontSize = 16.sp, fontWeight = FontWeight.Medium, color = p.text
+            MenuTarget(
+                p = p,
+                onClick = { onOpen(entry) },
+                modifier = Modifier.fillMaxWidth(),
+                groups = { close ->
+                    listOf(
+                        listOf(
+                            MenuAction("Play", Glyph.Play) { close { onPlayAll(entry.songs) } },
+                            MenuAction("Shuffle", Glyph.Shuffle) { close { onShuffle(entry.songs) } },
+                            MenuAction("Play next", Glyph.Next) { close { onPlayNext(entry.songs) } }
+                        ),
+                        listOf(MenuAction("Open artist", Glyph.Artist) { close { onOpen(entry) } })
                     )
-                    Text("${entry.songs.size} songs", fontSize = 14.sp, color = p.secondary)
+                }
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 20.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Cover(entry.songs.first(), Modifier.size(56.dp), 28.dp, p, 300, round = true)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            entry.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            fontSize = 16.sp, fontWeight = FontWeight.Medium, color = p.text
+                        )
+                        Text("${entry.songs.size} songs", fontSize = 14.sp, color = p.secondary)
+                    }
                 }
             }
         }
+    }
+    CollapsingBar("Artists", titleProg, p, topPad, Modifier.align(Alignment.TopStart))
     }
 }
