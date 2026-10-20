@@ -13,8 +13,10 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.onSizeChanged
@@ -66,6 +68,16 @@ fun MusicApp(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val profile = remember { ProfileStore(context) }
+    // Player surfaces follow the current cover independently from the app-wide theme.
+    var playerTint by remember { mutableStateOf<Color?>(null) }
+    val animatedPlayerTint by animateColorAsState(
+        targetValue = playerTint ?: p.accent,
+        animationSpec = tween(durationMillis = 850, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        label = "playerCoverTint"
+    )
+    val playerPalette = remember(p, animatedPlayerTint) {
+        Palette(p.dark, p.accent, settings.glass, p.corner, animatedPlayerTint, p.opaqueClassic)
+    }
 
     var granted by remember {
         mutableStateOf(
@@ -358,9 +370,11 @@ fun MusicApp(
         Toast.makeText(context, "Playlist will play next (${list.size} songs)", Toast.LENGTH_SHORT).show()
     }
 
-    // "Cover" theme: take the colour from the cover of the song that is playing.
-    LaunchedEffect(current?.id, settings.theme) {
-        if (settings.theme == 3) onTint(current?.let { songTint(context, it) })
+    // Derive the player palette from the playing cover even when the app-wide theme is fixed.
+    LaunchedEffect(current?.id) {
+        val tint = current?.let { songTint(context, it) }
+        playerTint = tint
+        onTint(tint)
     }
 
     // Writes the edited tags into the song file (and asks Android for permission if needed).
@@ -633,7 +647,7 @@ fun MusicApp(
                         song = song,
                         isPlaying = isPlaying,
                         isFav = favSet.contains(song.id),
-                        p = p,
+                        p = playerPalette,
                         onOpen = { showPlayer = true },
                         onToggle = {
                             controller?.let { if (it.isPlaying) it.pause() else it.play() }
@@ -776,7 +790,7 @@ fun MusicApp(
                     shuffle = shuffle,
                     repeatMode = repeatMode,
                     position = position,
-                    p = p,
+                    p = playerPalette,
                     onClose = { showPlayer = false },
                     onToggle = {
                         controller?.let { if (it.isPlaying) it.pause() else it.play() }
