@@ -12,7 +12,7 @@ A local music player for Android with an iOS-style look: floating liquid-glass t
 - **Media session** – background playback, notification controls, lock-screen controls, and headset or Bluetooth buttons (Media3 `MediaSessionService`).
 - **Profile** – your name, username, bio, and photo, stored on the device. The Profile tab shows your photo.
 - **Favorites** – tap the heart on any song or in the mini player.
-- **Playlists** – create playlists in Profile, or long-press any song to add it to one.
+- **Playlists** – create playlists in Profile, or open the song menu (three dots or long-press) to add it to one.
 - **Settings** (open them from the button in Profile):
   - Theme: system, light, or dark
   - Accent color
