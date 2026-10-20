@@ -236,20 +236,18 @@ private fun RowScope.IslandContent(
     onNext: () -> Unit,
     onFav: () -> Unit
 ) {
-    Cover(song, Modifier.size(42.dp), 0.dp, p, 300, round = true)
-    Spacer(Modifier.width(11.dp))
-    Column(Modifier.weight(1f)) {
-        Text(
-            song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White
-        )
-        Text(
-            song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f)
-        )
+    Box(
+        Modifier.size(38.dp).clip(CircleShape).clickable { onNext() },
+        contentAlignment = Alignment.Center
+    ) {
+        GlyphIcon(Glyph.Next, Color.White, Modifier.size(21.dp))
     }
-    SoundBars(isPlaying, p.accent)
-    Spacer(Modifier.width(6.dp))
+    Box(
+        Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.14f)).clickable { onToggle() },
+        contentAlignment = Alignment.Center
+    ) {
+        GlyphIcon(if (isPlaying) Glyph.Pause else Glyph.Play, Color.White, Modifier.size(19.dp))
+    }
     Box(
         Modifier.size(36.dp).clip(CircleShape).clickable { onFav() },
         contentAlignment = Alignment.Center
@@ -260,18 +258,21 @@ private fun RowScope.IslandContent(
             Modifier.size(18.dp)
         )
     }
-    Box(
-        Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.14f)).clickable { onToggle() },
-        contentAlignment = Alignment.Center
-    ) {
-        GlyphIcon(if (isPlaying) Glyph.Pause else Glyph.Play, Color.White, Modifier.size(19.dp))
+    Spacer(Modifier.width(6.dp))
+    SoundBars(isPlaying, p.accent)
+    Spacer(Modifier.weight(1f))
+    Column(Modifier.weight(1f)) {
+        Text(
+            song.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White
+        )
+        Text(
+            song.artist, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f)
+        )
     }
-    Box(
-        Modifier.size(38.dp).clip(CircleShape).clickable { onNext() },
-        contentAlignment = Alignment.Center
-    ) {
-        GlyphIcon(Glyph.Next, Color.White, Modifier.size(21.dp))
-    }
+    Spacer(Modifier.width(8.dp))
+    Cover(song, Modifier.size(42.dp), 0.dp, p, 300, round = true)
 }
 
 /** Little animated equalizer, like the live activity bars on the iPhone. */
@@ -649,14 +650,14 @@ fun TopIsland(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Start
         ) {
-            Cover(song, Modifier.size((islandHeightDp - 9).coerceAtLeast(20).dp), 0.dp, p, 200, round = true)
-            Spacer(Modifier.weight(1f))
             Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
                 repeat(4) { i ->
                     val barHeight = if (isPlaying) listOf(8, 15, 10, 18)[i].dp else 4.dp
                     Box(Modifier.width(3.dp).height(barHeight).clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = if (isPlaying) 0.92f else 0.45f)))
                 }
             }
+            Spacer(Modifier.weight(1f))
+            Cover(song, Modifier.size((islandHeightDp - 9).coerceAtLeast(20).dp), 0.dp, p, 200, round = true)
         }
     }
     if (menuOpen) {
@@ -669,12 +670,12 @@ fun TopIsland(
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Cover(song, Modifier.size(58.dp), 0.dp, p, 200, round = true)
-                        Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(song.title, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
                             Text(song.artist, color = Color.White.copy(alpha = 0.65f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
                         }
+                        Spacer(Modifier.width(12.dp))
+                        Cover(song, Modifier.size(58.dp), 0.dp, p, 200, round = true)
                     }
                     Spacer(Modifier.height(18.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
