@@ -71,6 +71,7 @@ class PlaybackService : MediaSessionService() {
 
         p.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                MusicWidget.pushFromPlayer(this@PlaybackService, p)
                 if (isPlaying) {
                     // a timer that ran out while paused is simply forgotten
                     if (SleepTimer.endAtMs > 0L && SystemClock.elapsedRealtime() >= SleepTimer.endAtMs) {
@@ -88,6 +89,7 @@ class PlaybackService : MediaSessionService() {
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 if (!fading) p.volume = 1f
+                MusicWidget.pushFromPlayer(this@PlaybackService, p)
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {

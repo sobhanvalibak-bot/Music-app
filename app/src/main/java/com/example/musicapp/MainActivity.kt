@@ -17,6 +17,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 
@@ -25,6 +26,43 @@ import androidx.compose.ui.graphics.Color
 class MainActivity : ComponentActivity() {
     // Bumped every time the user taps the playback notification.
     private var openPlayerSignal by mutableIntStateOf(0)
+
+    // Volume keys: the app draws its own thin iOS-style bar instead of the system panel.
+    private var volumeLevel by mutableFloatStateOf(0f)
+    private var volumeSignal by mutableIntStateOf(0)   // bumped on every key press
+    private var volumeEdge by mutableIntStateOf(0)     // bumped when a press hits the min/max
+    private val audio by lazy { getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager }
+
+    private fun musicLevel(): Float {
+        val max = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        return audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC).toFloat() / max
+    }
+
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) {
+            val before = audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+            try {
+                audio.adjustStreamVolume(
+                    android.media.AudioManager.STREAM_MUSIC,
+                    if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) android.media.AudioManager.ADJUST_RAISE
+                    else android.media.AudioManager.ADJUST_LOWER,
+                    0 // no system volume panel
+                )
+            } catch (_: Exception) {
+                return super.onKeyDown(keyCode, event) // e.g. Do Not Disturb: let the system handle it
+            }
+            volumeLevel = musicLevel()
+            if (audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) == before) volumeEdge += 1
+            volumeSignal += 1
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) return true
+        return super.onKeyUp(keyCode, event)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,6 +111,12 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize(), color = p.bg, contentColor = p.text) {
                     Box(Modifier.fillMaxSize().background(p.bgBrush)) {
                         MusicApp(p, settings, openPlayerSignal, onTint = { coverTint = it })
+                        VolumeHud(
+                            signal = volumeSignal,
+                            edge = volumeEdge,
+                            level = volumeLevel,
+                            modifier = Modifier.align(Alignment.CenterStart)
+                        )
                     }
                 }
             }

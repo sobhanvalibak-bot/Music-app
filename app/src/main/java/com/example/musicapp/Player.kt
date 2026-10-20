@@ -54,6 +54,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.onSizeChanged
 import kotlinx.coroutines.Dispatchers
@@ -176,6 +177,14 @@ fun FullPlayer(
     val currentLine = if (activeLyric >= 0) lyricLines[activeLyric].text else if (!lyricSynced && lyricLines.isNotEmpty()) lyricLines.first().text else ""
 
     val tiltState = rememberDeviceTilt()
+    // The cover flies up from the mini player (bottom-left) into place when the player opens.
+    var coverIn by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { coverIn = true }
+    val coverFly by animateFloatAsState(
+        if (coverIn) 1f else 0f,
+        spring(dampingRatio = 0.78f, stiffness = 220f),
+        label = "coverFly"
+    )
 
     Box(
         Modifier
@@ -232,12 +241,18 @@ fun FullPlayer(
                     Modifier
                         .aspectRatio(1f)
                         .graphicsLayer {
-                            scaleX = coverScale
-                            scaleY = coverScale
+                            val fly = (0.28f + 0.72f * coverFly)
+                            scaleX = coverScale * fly
+                            scaleY = coverScale * fly
+                            translationY = (1f - coverFly) * size.height * 1.5f
+                            translationX = -(1f - coverFly) * size.width * 0.35f
                             cameraDistance = 14f * density
                             rotationY = tiltState.value.x * 26f
                             rotationX = -tiltState.value.y * 26f
-                            shadowElevation = 28.dp.toPx()
+                            // paused: the cover shrinks (above), loses its shadow and dims, like Apple Music
+                            val playF = ((coverScale - 0.82f) / 0.18f).coerceIn(0f, 1f)
+                            alpha = 0.72f + 0.28f * playF
+                            shadowElevation = (10f + 18f * playF).dp.toPx()
                             shape = RoundedCornerShape(16.dp)
                             clip = false
                             ambientShadowColor = Color.Black
@@ -309,7 +324,8 @@ fun FullPlayer(
             Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
                 Text(formatTime(shownMs), fontSize = 12.sp, color = sub)
                 Spacer(Modifier.weight(1f))
-                Text(formatTime(duration), fontSize = 12.sp, color = sub)
+                // time left, like the iPhone: -2:03
+                Text("-" + formatTime((duration - shownMs).coerceAtLeast(0L)), fontSize = 12.sp, color = sub)
             }
 
             Spacer(Modifier.height(8.dp))
@@ -353,19 +369,7 @@ fun FullPlayer(
                 PlayerIconButton(Glyph.Moon, if (sleepActive || sleepEndOfSong) p.accent else fg, 46.dp, 22.dp, onClick = { showSleep = true })
                 PlayerIconButton(Glyph.Volume, if (showVolume) p.accent else fg, 46.dp, 24.dp, onClick = { showVolume = !showVolume })
                 Spacer(Modifier.weight(1f))
-                PlayerIconButton(Glyph.Share, fg, 46.dp, 24.dp, onClick = {
-                    try {
-                        val shareText = "${song.title} — ${song.artist}" + if (song.album.isNotBlank()) "\n${song.album}" else ""
-                        val send = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_SUBJECT, song.title)
-                            putExtra(Intent.EXTRA_TEXT, shareText)
-                        }
-                        context.startActivity(Intent.createChooser(send, "Share song"))
-                    } catch (_: Exception) {
-                        Toast.makeText(context, "Unable to share this song", Toast.LENGTH_SHORT).show()
-                    }
-                })
+                PlayerIconButton(Glyph.Share, fg, 46.dp, 24.dp, onClick = { shareSongCard(context, song) })
                 PlayerIconButton(Glyph.Queue, fg, 46.dp, 24.dp, onClick = { showQueue = true })
             }
 
@@ -563,6 +567,10 @@ private fun SpotifySeekBar(
     var widthPx by remember { mutableFloatStateOf(1f) }
     var active by remember { mutableStateOf(false) }
     val grow by animateFloatAsState(if (active) 1f else 0f, spring(dampingRatio = 0.6f, stiffness = 500f), label = "seekGrow")
+    var curFrac by remember { mutableFloatStateOf(0f) }
+    var lastX by remember { mutableFloatStateOf(0f) }
+    var scrubSpeed by remember { mutableFloatStateOf(1f) }
+    val haptic = LocalHapticFeedback.current
     val onChangeS by rememberUpdatedState(onChange)
     val onFinishS by rememberUpdatedState(onFinish)
     Box(
@@ -576,18 +584,47 @@ private fun SpotifySeekBar(
                 }
             }
             .pointerInput(Unit) {
-                detectHorizontalDragGestures(
-                    onDragStart = { off -> active = true; onChangeS((off.x / widthPx).coerceIn(0f, 1f)) },
-                    onHorizontalDrag = { change, _ ->
-                        change.consume()
-                        onChangeS((change.position.x / widthPx).coerceIn(0f, 1f))
+                // Fine scrubbing like iOS: the further the finger is from the bar vertically,
+                // the slower and more precise the seek becomes (1x, 1/2, 1/4, 1/10).
+                detectDragGestures(
+                    onDragStart = { off ->
+                        active = true
+                        curFrac = (off.x / widthPx).coerceIn(0f, 1f)
+                        lastX = off.x
+                        scrubSpeed = 1f
+                        onChangeS(curFrac)
                     },
-                    onDragEnd = { active = false; onFinishS() },
-                    onDragCancel = { active = false; onFinishS() }
+                    onDrag = { change, _ ->
+                        change.consume()
+                        val dist = kotlin.math.abs(change.position.y - size.height / 2f)
+                        val speed = when {
+                            dist < 70.dp.toPx() -> 1f
+                            dist < 140.dp.toPx() -> 0.5f
+                            dist < 220.dp.toPx() -> 0.25f
+                            else -> 0.1f
+                        }
+                        if (speed != scrubSpeed) {
+                            scrubSpeed = speed
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        }
+                        curFrac = (curFrac + (change.position.x - lastX) / widthPx * speed).coerceIn(0f, 1f)
+                        lastX = change.position.x
+                        onChangeS(curFrac)
+                    },
+                    onDragEnd = { active = false; scrubSpeed = 1f; onFinishS() },
+                    onDragCancel = { active = false; scrubSpeed = 1f; onFinishS() }
                 )
             },
         contentAlignment = Alignment.CenterStart
     ) {
+        if (active && scrubSpeed < 1f) {
+            Text(
+                when (scrubSpeed) { 0.5f -> "Half speed"; 0.25f -> "Quarter speed"; else -> "Fine scrubbing" },
+                fontSize = 11.sp,
+                color = Color.White.copy(alpha = 0.85f),
+                modifier = Modifier.align(Alignment.TopCenter).offset(y = (-18).dp)
+            )
+        }
         val trackH = 4.dp + 6.dp * grow
         Box(
             Modifier.fillMaxWidth().height(trackH).clip(RoundedCornerShape(50))

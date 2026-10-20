@@ -366,7 +366,8 @@ fun TopIsland(
     onOpenPlayer: () -> Unit = {},
     expanded: Boolean = false,
     onExpandedChange: (Boolean) -> Unit = {},
-    onLongPress: () -> Unit = {}
+    onLongPress: () -> Unit = {},
+    sleepActive: Boolean = false
 ) {
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
@@ -484,6 +485,11 @@ fun TopIsland(
                     Cover(song, Modifier.size((islandHeightDp - 8).coerceAtLeast(20).dp), 0.dp, p, 200, round = true)
                     // only the cover and the wave: the title shows when the island is expanded
                     Spacer(Modifier.weight(1f))
+                    // small blue moon while the sleep timer is running
+                    if (sleepActive) {
+                        GlyphIcon(Glyph.Moon, Color(0xFF0A84FF), Modifier.size(13.dp))
+                        Spacer(Modifier.width(6.dp))
+                    }
                     IslandWave(isPlaying, wavePhase, Color.White, 0.85f)
                     Spacer(Modifier.width(6.dp))
                 }

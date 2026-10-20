@@ -88,16 +88,25 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 
 // ───────────────────────── Small pieces ─────────────────────────
 
 @Composable
 fun OptionPill(text: String, selected: Boolean, p: Palette, onClick: () -> Unit) {
+    // small press effect: the pill shrinks a little under the finger and springs back
+    val source = remember { MutableInteractionSource() }
+    val down by source.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        if (down) 0.93f else 1f, spring(dampingRatio = 0.6f, stiffness = 600f), label = "pillPress"
+    )
     Box(
         Modifier
+            .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
             .clip(RoundedCornerShape(50))
             .background(if (selected) p.accent else p.selectedPill)
-            .clickable(onClick = onClick)
+            .clickable(interactionSource = source, indication = null, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
         Text(

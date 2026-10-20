@@ -150,6 +150,8 @@ class Settings(private val prefs: SharedPreferences) {
     var crossfade by mutableIntStateOf(prefs.getInt("crossfade", 0)); private set
     var skipSilence by mutableStateOf(prefs.getBoolean("skip_silence", false)); private set
     var speed by mutableFloatStateOf(prefs.getFloat("speed", 1f)); private set
+    /** Albums grid columns (1-4), changed by pinching on the Albums tab. */
+    var albumColumns by mutableIntStateOf(prefs.getInt("album_columns", 2).coerceIn(1, 4)); private set
 
     fun changeTheme(v: Int) { theme = v; prefs.edit().putInt("theme", v).apply() }
     fun changeAccent(v: Int) { accent = v; prefs.edit().putInt("accent", v).apply() }
@@ -166,6 +168,7 @@ class Settings(private val prefs: SharedPreferences) {
     fun changeCrossfade(v: Int) { crossfade = v; prefs.edit().putInt("crossfade", v).apply() }
     fun changeSkipSilence(v: Boolean) { skipSilence = v; prefs.edit().putBoolean("skip_silence", v).apply() }
     fun changeSpeed(v: Float) { speed = v; prefs.edit().putFloat("speed", v).apply() }
+    fun changeAlbumColumns(v: Int) { albumColumns = v.coerceIn(1, 4); prefs.edit().putInt("album_columns", albumColumns).apply() }
 }
 
 // ───────────────────────── Profile (stored on device) ─────────────────────────

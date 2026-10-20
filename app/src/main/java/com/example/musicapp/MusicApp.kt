@@ -52,7 +52,9 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -184,6 +186,11 @@ fun MusicApp(
     }
 
     var tab by remember { mutableIntStateOf(0) }
+    val appHaptic = LocalHapticFeedback.current
+    fun favWithHaptic(id: Long) {
+        appHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        profile.toggleFavorite(id)
+    }
     var sub by remember { mutableStateOf<Sub>(Sub.None) }
     var addTarget by remember { mutableStateOf<Song?>(null) }
     var showNewPlaylist by remember { mutableStateOf(false) }
@@ -193,6 +200,7 @@ fun MusicApp(
     var islandExpanded by remember { mutableStateOf(false) }
     // quick menu that opens when the Dynamic Island is held
     var islandMenu by remember { mutableStateOf(false) }
+    var showIslandSleep by remember { mutableStateOf(false) }
     LaunchedEffect(showPlayer) { if (showPlayer) { islandExpanded = false; islandMenu = false } }
     var artistPage by remember { mutableStateOf<String?>(null) }
     var albumPage by remember { mutableStateOf<List<Song>?>(null) }
@@ -590,7 +598,7 @@ fun MusicApp(
                             bottomPad = bottomPad,
                             onBack = { sub = Sub.None },
                             onPlay = { i -> playQueue(favSongs, i) },
-                            onToggleFav = { profile.toggleFavorite(it.id) },
+                            onToggleFav = { favWithHaptic(it.id) },
                             onLong = { addTarget = it },
                             onRemove = null,
                             onPlayNext = { queueNext(it) },
@@ -614,7 +622,7 @@ fun MusicApp(
                                 bottomPad = bottomPad,
                                 onBack = { sub = Sub.None },
                                 onPlay = { i -> playQueue(plSongs, i) },
-                                onToggleFav = { profile.toggleFavorite(it.id) },
+                                onToggleFav = { favWithHaptic(it.id) },
                                 onRemove = { profile.removeFromPlaylist(pl.id, it.id) },
                                 onPlayNext = { queueNextAll(plSongs) },
                                 onSongPlayNext = { queueNext(it) },
@@ -644,7 +652,7 @@ fun MusicApp(
                     topPad = topPad,
                     bottomPad = bottomPad,
                     onPlay = { i -> playQueue(sorted, i) },
-                    onToggleFav = { profile.toggleFavorite(it.id) },
+                    onToggleFav = { favWithHaptic(it.id) },
                     onLong = { addTarget = it },
                     onPlayNext = { queueNext(it) },
                     onEditInfo = { editTarget = it },
@@ -655,7 +663,9 @@ fun MusicApp(
                     albums, p, sortSubtitle, topPad, bottomPad,
                     onPlayAll = { playQueue(it, 0) },
                     onPlayNext = { queueNextAll(it) },
-                    onShuffle = { playQueue(it.shuffled(), 0) }
+                    onShuffle = { playQueue(it.shuffled(), 0) },
+                    columns = settings.albumColumns,
+                    onColumns = { settings.changeAlbumColumns(it) }
                 ) { list -> albumPage = list }
                 else -> ArtistsTab(
                     artists, p, topPad, bottomPad,
@@ -677,7 +687,7 @@ fun MusicApp(
                     showDuration = showDuration, topPad = topPad, bottomPad = bottomPad,
                     onBack = { albumPage = null },
                     onPlay = { i -> playQueue(list, i) },
-                    onToggleFav = { profile.toggleFavorite(it.id) },
+                    onToggleFav = { favWithHaptic(it.id) },
                     onLong = { addTarget = it }, onRemove = null, backLabel = "Albums",
                     onPlayNext = { queueNext(it) }, onEditInfo = { editTarget = it }
                 )
@@ -709,7 +719,7 @@ fun MusicApp(
                     bottomPad = bottomPad,
                     onBack = { artistPage = null },
                     onPlay = { i -> playQueue(list, i) },
-                    onToggleFav = { profile.toggleFavorite(it.id) },
+                    onToggleFav = { favWithHaptic(it.id) },
                     onLong = { addTarget = it },
                     onRemove = null,
                     backLabel = "Back",
@@ -733,7 +743,7 @@ fun MusicApp(
                 bottomPad = bottomPad,
                 onClose = { searching = false },
                 onPlay = { list, i -> playQueue(list, i) },
-                onToggleFav = { profile.toggleFavorite(it.id) },
+                onToggleFav = { favWithHaptic(it.id) },
                 onLong = { addTarget = it }
             )
         }
@@ -849,10 +859,10 @@ fun MusicApp(
                             isFav = favSet.contains(song.id),
                             shuffle = shuffle,
                             repeatMode = repeatMode,
-                            onToggle = { controller?.let { if (it.isPlaying) it.pause() else it.play() } },
+                            onToggle = { appHaptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); controller?.let { if (it.isPlaying) it.pause() else it.play() } },
                             onNext = { controller?.let { if (it.hasNextMediaItem()) it.seekToNextMediaItem() } },
                             onPrev = { controller?.let { if (it.hasPreviousMediaItem()) it.seekToPreviousMediaItem() else it.seekTo(0) } },
-                            onFav = { profile.toggleFavorite(song.id) },
+                            onFav = { favWithHaptic(song.id) },
                             onShuffle = { controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } },
                             onRepeat = { controller?.let { it.repeatMode = when (it.repeatMode) { Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL; Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE; else -> Player.REPEAT_MODE_OFF } } },
                             islandWidthDp = settings.islandWidth,
@@ -866,7 +876,8 @@ fun MusicApp(
                             onOpenPlayer = { showPlayer = true },
                             expanded = islandExpanded,
                             onExpandedChange = { islandExpanded = it },
-                            onLongPress = { islandExpanded = false; islandMenu = true }
+                            onLongPress = { islandExpanded = false; islandMenu = true },
+                            sleepActive = sleepEndAt != null || sleepEndOfSong
                         )
                     }
                 }
@@ -910,7 +921,7 @@ fun MusicApp(
                                     MenuAction(
                                         if (isFavNow) "Remove favorite" else "Favorite",
                                         if (isFavNow) Glyph.Heart else Glyph.HeartOutline
-                                    ) { profile.toggleFavorite(menuSong.id); islandMenu = false },
+                                    ) { favWithHaptic(menuSong.id); islandMenu = false },
                                     MenuAction("Add to playlist", Glyph.PlusCircle) { addTarget = menuSong; islandMenu = false }
                                 ),
                                 listOf(
@@ -919,6 +930,17 @@ fun MusicApp(
                                         islandMenu = false
                                         shareSong(context, menuSong)
                                     }
+                                ),
+                                listOf(
+                                    MenuAction(
+                                        when {
+                                            sleepEndOfSong -> "Sleep timer · end of song"
+                                            sleepEndAt != null -> "Sleep timer · ${formatTime(sleepLeftMs)}"
+                                            else -> "Sleep timer"
+                                        },
+                                        Glyph.Moon,
+                                        if (sleepEndAt != null || sleepEndOfSong) Color(0xFF0A84FF) else null
+                                    ) { islandMenu = false; showIslandSleep = true }
                                 )
                             )
                         )
@@ -979,7 +1001,7 @@ fun MusicApp(
                             }
                         }
                     },
-                    onFav = { profile.toggleFavorite(song.id) },
+                    onFav = { favWithHaptic(song.id) },
                     onAddToPlaylist = { addTarget = song },
                     onArtist = { name ->
                         showPlayer = false
@@ -1025,6 +1047,16 @@ fun MusicApp(
                 )
             }
         }
+    }
+
+    if (showIslandSleep) {
+        SleepTimerSheet(
+            active = sleepEndAt != null,
+            endOfSong = sleepEndOfSong,
+            leftMs = sleepLeftMs,
+            onPick = { startSleep(it) },
+            onDismiss = { showIslandSleep = false }
+        )
     }
 
     addTarget?.let { song ->

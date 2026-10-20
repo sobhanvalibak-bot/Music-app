@@ -10,6 +10,11 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.zIndex
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.*
@@ -37,13 +42,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -924,9 +927,14 @@ fun AlbumsTab(
     onPlayAll: (List<Song>) -> Unit,
     onPlayNext: (List<Song>) -> Unit,
     onShuffle: (List<Song>) -> Unit,
+    columns: Int = 2,
+    onColumns: (Int) -> Unit = {},
     onPlay: (List<Song>) -> Unit
 ) {
     val gridState = rememberLazyGridState()
+    val pinchHaptic = LocalHapticFeedback.current
+    val columnsS by rememberUpdatedState(columns)
+    val onColumnsS by rememberUpdatedState(onColumns)
     val fadePx = with(LocalDensity.current) { 64.dp.toPx() }
     val titleProg by remember {
         derivedStateOf {
@@ -938,7 +946,35 @@ fun AlbumsTab(
     Box(Modifier.fillMaxSize()) {
     LazyVerticalGrid(
         state = gridState,
-        columns = GridCells.Fixed(2),
+        columns = GridCells.Fixed(columns.coerceIn(1, 4)),
+        modifier = Modifier.pointerInput(Unit) {
+            // Pinch with two fingers: spread = bigger covers (fewer columns), pinch = more columns.
+            // Events are only watched (never consumed), so normal scrolling keeps working.
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false)
+                var startDist = 0f
+                var changed = false
+                do {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val down = event.changes.filter { it.pressed }
+                    if (down.size >= 2 && !changed) {
+                        val d = (down[0].position - down[1].position).getDistance()
+                        if (startDist == 0f) {
+                            startDist = d
+                        } else {
+                            val ratio = d / startDist
+                            if (ratio > 1.3f && columnsS > 1) {
+                                onColumnsS(columnsS - 1); changed = true
+                                pinchHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            } else if (ratio < 0.75f && columnsS < 4) {
+                                onColumnsS(columnsS + 1); changed = true
+                                pinchHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            }
+                        }
+                    }
+                } while (event.changes.any { it.pressed })
+            }
+        },
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = topPad, bottom = bottomPad),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)

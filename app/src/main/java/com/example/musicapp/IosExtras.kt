@@ -114,6 +114,25 @@ fun IosSwitch(p: Palette, checked: Boolean, onCheckedChange: (Boolean) -> Unit) 
                     }
                 )
             }
+            .pointerInput(checked) {
+                // drag the knob to the other side, like iOS
+                var total = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { total = 0f; pressed = true },
+                    onHorizontalDrag = { change, dx -> change.consume(); total += dx },
+                    onDragEnd = {
+                        pressed = false
+                        if (total > 10f && !checked) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            changeS(true)
+                        } else if (total < -10f && checked) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            changeS(false)
+                        }
+                    },
+                    onDragCancel = { pressed = false }
+                )
+            }
     ) {
         Box(
             Modifier

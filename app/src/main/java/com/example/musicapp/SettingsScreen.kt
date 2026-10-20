@@ -22,6 +22,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 
 // ───────────────────────── Settings screen ─────────────────────────
 
@@ -44,12 +51,48 @@ fun SettingsCard(title: String, p: Palette, content: @Composable ColumnScope.() 
 @Composable
 fun Segmented(options: List<String>, selected: Int, p: Palette, onSelect: (Int) -> Unit) {
     val n = options.size.coerceAtLeast(1)
+    val haptic = LocalHapticFeedback.current
+    var pressed by remember { mutableStateOf(false) }
+    // like iOS: while a finger is on the control the pill grows, lifts (shadow) and follows the finger
+    val lift by animateFloatAsState(
+        if (pressed) 1f else 0f, spring(dampingRatio = 0.6f, stiffness = 500f), label = "segLift"
+    )
+    val selectedS by rememberUpdatedState(selected)
+    val onSelectS by rememberUpdatedState(onSelect)
     BoxWithConstraints(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(p.selectedPill)
+            .background(p.selectedPill, RoundedCornerShape(12.dp))
             .padding(3.dp)
+            .pointerInput(n) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val segPx = size.width.toFloat() / n
+                    var last = (down.position.x / segPx).toInt().coerceIn(0, n - 1)
+                    pressed = true
+                    try {
+                        if (last != selectedS) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSelectS(last)
+                        }
+                        do {
+                            val event = awaitPointerEvent()
+                            val c = event.changes.firstOrNull() ?: break
+                            if (c.isConsumed) break
+                            if (c.pressed) {
+                                val i = (c.position.x / segPx).toInt().coerceIn(0, n - 1)
+                                if (i != last) {
+                                    last = i
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onSelectS(i)
+                                }
+                            }
+                        } while (event.changes.any { it.pressed })
+                    } finally {
+                        pressed = false
+                    }
+                }
+            }
     ) {
         val segW = maxWidth / n
         // the highlighted pill slides to the chosen option with a small spring
@@ -62,8 +105,15 @@ fun Segmented(options: List<String>, selected: Int, p: Palette, onSelect: (Int) 
                 .offset(x = x)
                 .width(segW)
                 .height(36.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(p.segment)
+                .graphicsLayer {
+                    val sc = 1f + 0.08f * lift
+                    scaleX = sc
+                    scaleY = sc
+                    shadowElevation = 10.dp.toPx() * lift
+                    shape = RoundedCornerShape(10.dp)
+                    clip = false
+                }
+                .background(p.segment, RoundedCornerShape(10.dp))
         )
         Row(Modifier.fillMaxWidth()) {
             options.forEachIndexed { i, label ->
@@ -71,9 +121,7 @@ fun Segmented(options: List<String>, selected: Int, p: Palette, onSelect: (Int) 
                 Box(
                     Modifier
                         .weight(1f)
-                        .height(36.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onSelect(i) },
+                        .height(36.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
