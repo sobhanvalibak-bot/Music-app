@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import androidx.media3.common.Player
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -69,7 +70,8 @@ fun MiniPlayer(
     onPrev: () -> Unit,
     canNext: () -> Boolean,
     onFav: () -> Unit,
-    style: Int = 0
+    style: Int = 0,
+    flatDock: Boolean = false
 ) {
     val island = style == 1
     val shape: Shape = if (island) RoundedCornerShape(50) else RoundedCornerShape(24.dp)
@@ -164,9 +166,13 @@ fun MiniPlayer(
                 scaleX = sc
                 scaleY = sc
             }
-            .padding(horizontal = 14.dp)
+            .then(if (flatDock) Modifier else Modifier.padding(horizontal = 14.dp))
             .then(
-                if (island) Modifier
+                if (flatDock) Modifier
+                    .clip(RoundedCornerShape(0.dp))
+                    .background(p.card)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                else if (island) Modifier
                     .shadow(16.dp, shape, ambientColor = Color.Black.copy(alpha = 0.5f), spotColor = Color.Black.copy(alpha = 0.5f))
                     .clip(shape)
                     .background(Color.Black)
@@ -317,8 +323,13 @@ fun GlassTabBar(
     onSelect: (Int) -> Unit,
     p: Palette,
     photo: ImageBitmap?,
-    profileName: String
+    profileName: String,
+    classic: Boolean = false
 ) {
+    if (classic) {
+        ClassicTabBar(modifier, selected, onSelect, p, photo, profileName)
+        return
+    }
     val tabs = listOf(
         "Songs" to Glyph.Note,
         "Albums" to Glyph.Album,
@@ -528,12 +539,48 @@ fun GlassTabBar(
     }
 }
 
+@Composable
+private fun ClassicTabBar(
+    modifier: Modifier,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    p: Palette,
+    photo: ImageBitmap?,
+    profileName: String
+) {
+    val tabs = listOf("Songs" to Glyph.Note, "Albums" to Glyph.Album, "Artists" to Glyph.Artist, "Profile" to Glyph.Artist)
+    Row(
+        modifier.height(BarHeight).background(p.card),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        tabs.forEachIndexed { i, (label, glyph) ->
+            val chosen = selected == i
+            Column(
+                Modifier.weight(1f).fillMaxHeight()
+                    .background(if (chosen) p.selectedPill else Color.Transparent)
+                    .clickable { onSelect(i) }
+                    .padding(vertical = 7.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                if (i == 3) {
+                    Avatar(photo, profileName, p, Modifier.size(25.dp).then(if (chosen) Modifier.border(1.5.dp, p.accent, CircleShape) else Modifier), 14.sp)
+                } else {
+                    GlyphIcon(glyph, if (chosen) p.accent else p.secondary, Modifier.size(23.dp))
+                }
+                Spacer(Modifier.height(3.dp))
+                Text(label, fontSize = 10.sp, fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Medium, color = if (chosen) p.accent else p.secondary, maxLines = 1)
+            }
+        }
+    }
+}
+
 val BarHeight = 64.dp
 private val BarPad = 6.dp
 
 /** Round glass search button that sits next to the tab bar (like the iOS tab bar). */
 @Composable
-fun SearchButton(active: Boolean, p: Palette, onClick: () -> Unit) {
+fun SearchButton(active: Boolean, p: Palette, onClick: () -> Unit, classic: Boolean = false) {
     var pressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         if (pressed) 0.88f else 1f,
@@ -549,8 +596,8 @@ fun SearchButton(active: Boolean, p: Palette, onClick: () -> Unit) {
                 scaleX = scale
                 scaleY = scale
             }
-            .glass(CircleShape, p)
-            .background(if (active) p.accent.copy(alpha = 0.22f) else Color.Transparent, CircleShape)
+            .then(if (classic) Modifier.background(p.card) else Modifier.glass(CircleShape, p))
+            .background(if (active) p.accent.copy(alpha = 0.22f) else Color.Transparent, if (classic) RoundedCornerShape(0.dp) else CircleShape)
             .pointerInput(Unit) {
                 detectTapGestures(
                     onPress = {
@@ -573,79 +620,105 @@ fun formatTime(ms: Long): String {
 }
 
 
-/**
- * Small minimal pill at the top centre of the screen (Dynamic Island place).
- * Round cover on the left, song title next to it. A long title scrolls round in a loop
- * and stops for a moment each time it is back at the start. Tap opens the full player.
- */
-@OptIn(ExperimentalFoundationApi::class)
+/** Fixed-size cover-only Dynamic Island. Tapping it opens a compact playback control panel. */
 @Composable
 fun TopIsland(
     song: Song,
     p: Palette,
-    onOpen: () -> Unit,
+    isPlaying: Boolean,
+    isFav: Boolean,
+    shuffle: Boolean,
+    repeatMode: Int,
+    onToggle: () -> Unit,
+    onNext: () -> Unit,
+    onPrev: () -> Unit,
+    onFav: () -> Unit,
+    onShuffle: () -> Unit,
+    onRepeat: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
     val statusH = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
-    val pillH = 34.dp
+    val pillH = 36.dp
     val top = ((statusH - pillH) / 2).coerceAtLeast(4.dp)
     val shape = RoundedCornerShape(50)
-
-    // pops a little each time the song changes
+    var menuOpen by remember { mutableStateOf(false) }
     val pop = remember { Animatable(1f) }
     LaunchedEffect(song.id) {
-        pop.snapTo(1.08f)
-        pop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 380f))
+        pop.snapTo(1.06f)
+        pop.animateTo(1f, spring(dampingRatio = 0.48f, stiffness = 380f))
     }
-    var pressed by remember { mutableStateOf(false) }
-    val press by animateFloatAsState(
-        if (pressed) 1f else 0f, spring(dampingRatio = 0.6f, stiffness = 500f), label = "topIslandPress"
-    )
-    val onOpenS by rememberUpdatedState(onOpen)
-
     Box(modifier.fillMaxWidth().padding(top = top), contentAlignment = Alignment.TopCenter) {
         Row(
             Modifier
-                .graphicsLayer {
-                    val sc = pop.value * (1f - 0.04f * press)
-                    scaleX = sc
-                    scaleY = sc
-                }
+                .graphicsLayer { scaleX = pop.value; scaleY = pop.value }
+                .width(112.dp)
                 .height(pillH)
                 .clip(shape)
                 .background(Color.Black)
-                .border(1.dp, Color.White.copy(alpha = 0.10f), shape)
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onPress = { pressed = true; tryAwaitRelease(); pressed = false },
-                        onTap = { onOpenS() }
-                    )
-                }
-                .padding(start = 4.dp, end = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .border(1.dp, Color.White.copy(alpha = 0.12f), shape)
+                .clickable { menuOpen = true }
+                .padding(horizontal = 5.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
         ) {
-            Cover(song, Modifier.size(26.dp), 0.dp, p, 200, round = true)
-            Spacer(Modifier.width(8.dp))
-            // restart the scroll from the start for every new song
-            key(song.id) {
-                Text(
-                    song.title,
-                    maxLines = 1,
-                    softWrap = false,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color.White,
-                    modifier = Modifier
-                        .widthIn(max = 150.dp)
-                        .basicMarquee(
-                            iterations = Int.MAX_VALUE,
-                            initialDelayMillis = 1500,
-                            spacing = MarqueeSpacing(28.dp),
-                            velocity = 40.dp
-                        )
-                )
+            Cover(song, Modifier.size(27.dp), 0.dp, p, 200, round = true)
+            Spacer(Modifier.width(15.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                repeat(4) { i ->
+                    val barHeight = if (isPlaying) listOf(8, 15, 10, 18)[i].dp else 4.dp
+                    Box(Modifier.width(3.dp).height(barHeight).clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = if (isPlaying) 0.92f else 0.45f)))
+                }
             }
         }
+    }
+    if (menuOpen) {
+        AlertDialog(
+            onDismissRequest = { menuOpen = false },
+            containerColor = Color(0xFF171719),
+            titleContentColor = Color.White,
+            textContentColor = Color.White,
+            title = { Text("Now playing", fontWeight = FontWeight.SemiBold) },
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Cover(song, Modifier.size(58.dp), 0.dp, p, 200, round = true)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(song.title, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
+                            Text(song.artist, color = Color.White.copy(alpha = 0.65f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
+                        }
+                    }
+                    Spacer(Modifier.height(18.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                        IslandControl(Glyph.Shuffle, if (shuffle) p.accent else Color.White.copy(alpha = 0.7f), "Shuffle", onShuffle)
+                        IslandControl(Glyph.Prev, Color.White, "Previous", onPrev)
+                        IslandControl(if (isPlaying) Glyph.Pause else Glyph.Play, Color.White, if (isPlaying) "Pause" else "Play", onToggle, large = true)
+                        IslandControl(Glyph.Next, Color.White, "Next", onNext)
+                        IslandControl(Glyph.Repeat, if (repeatMode != Player.REPEAT_MODE_OFF) p.accent else Color.White.copy(alpha = 0.7f), if (repeatMode == Player.REPEAT_MODE_ONE) "Repeat one" else "Repeat", onRepeat)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = onFav) {
+                        GlyphIcon(if (isFav) Glyph.Heart else Glyph.HeartOutline, if (isFav) Color(0xFFFF375F) else Color.White, Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (isFav) "Remove from favorites" else "Add to favorites", color = Color.White)
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { menuOpen = false }) { Text("Done", color = p.accent) } }
+        )
+    }
+}
+
+@Composable
+private fun IslandControl(glyph: Glyph, color: Color, description: String, onClick: () -> Unit, large: Boolean = false) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier.size(if (large) 48.dp else 38.dp).clip(CircleShape)
+                .background(if (large) Color.White.copy(alpha = 0.12f) else Color.Transparent)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) { GlyphIcon(glyph, color, Modifier.size(if (large) 25.dp else 20.dp)) }
+        Text(description, color = Color.White.copy(alpha = 0.58f), fontSize = 9.sp, maxLines = 1)
     }
 }

@@ -135,10 +135,17 @@ class Settings(private val prefs: SharedPreferences) {
     var sort by mutableIntStateOf(prefs.getInt("sort", 0)); private set
     var glass by mutableFloatStateOf(prefs.getFloat("glass", 0.78f)); private set
     var opaqueClassic by mutableStateOf(prefs.getBoolean("opaque_classic", false)); private set
+    /** 0 = floating glass tabs, 1 = classic full-width dock. */
+    var tabBarStyle by mutableIntStateOf(prefs.getInt("tab_bar_style", 0).coerceIn(0, 1)); private set
     var corners by mutableFloatStateOf(prefs.getFloat("corners", 1f)); private set
     var showDuration by mutableStateOf(prefs.getBoolean("duration", true)); private set
-    /** 0 = classic glass mini player, 1 = Dynamic Island (black pill), 2 = small pill at the top centre */
-    var miniStyle by mutableIntStateOf(prefs.getInt("mini_style", 0)); private set
+    /** 0 = classic glass mini player, 1 = the fixed-size Dynamic Island at the top. */
+    var miniStyle by mutableIntStateOf(prefs.getInt("mini_style", 0).coerceIn(0, 1)); private set
+    var noticeEnabled by mutableStateOf(prefs.getBoolean("notice_island_enabled", true)); private set
+    /** 0 = compact, 1 = balanced, 2 = wide notification panel. */
+    var noticeSize by mutableIntStateOf(prefs.getInt("notice_island_size", 1).coerceIn(0, 2)); private set
+    /** 0 = black, 1 = translucent glass, 2 = accent-tinted. */
+    var noticeTint by mutableIntStateOf(prefs.getInt("notice_island_tint", 0).coerceIn(0, 2)); private set
     /** Crossfade between songs in seconds, 0 = off (read by PlaybackService from the same prefs). */
     var crossfade by mutableIntStateOf(prefs.getInt("crossfade", 0)); private set
     var skipSilence by mutableStateOf(prefs.getBoolean("skip_silence", false)); private set
@@ -149,9 +156,13 @@ class Settings(private val prefs: SharedPreferences) {
     fun changeSort(v: Int) { sort = v; prefs.edit().putInt("sort", v).apply() }
     fun changeGlass(v: Float) { glass = v; prefs.edit().putFloat("glass", v).apply() }
     fun changeOpaqueClassic(v: Boolean) { opaqueClassic = v; prefs.edit().putBoolean("opaque_classic", v).apply() }
+    fun changeTabBarStyle(v: Int) { tabBarStyle = v.coerceIn(0, 1); prefs.edit().putInt("tab_bar_style", tabBarStyle).apply() }
     fun changeCorners(v: Float) { corners = v; prefs.edit().putFloat("corners", v).apply() }
     fun changeShowDuration(v: Boolean) { showDuration = v; prefs.edit().putBoolean("duration", v).apply() }
-    fun changeMiniStyle(v: Int) { miniStyle = v; prefs.edit().putInt("mini_style", v).apply() }
+    fun changeMiniStyle(v: Int) { miniStyle = v.coerceIn(0, 1); prefs.edit().putInt("mini_style", miniStyle).apply() }
+    fun changeNoticeEnabled(v: Boolean) { noticeEnabled = v; prefs.edit().putBoolean("notice_island_enabled", v).apply() }
+    fun changeNoticeSize(v: Int) { noticeSize = v.coerceIn(0, 2); prefs.edit().putInt("notice_island_size", noticeSize).apply() }
+    fun changeNoticeTint(v: Int) { noticeTint = v.coerceIn(0, 2); prefs.edit().putInt("notice_island_tint", noticeTint).apply() }
     fun changeCrossfade(v: Int) { crossfade = v; prefs.edit().putInt("crossfade", v).apply() }
     fun changeSkipSilence(v: Boolean) { skipSilence = v; prefs.edit().putBoolean("skip_silence", v).apply() }
     fun changeSpeed(v: Float) { speed = v; prefs.edit().putFloat("speed", v).apply() }

@@ -130,18 +130,37 @@ fun SettingsTab(
             }
         }
         item {
-            SettingsCard("Mini player style", p) {
-                Segmented(listOf("Classic", "Dynamic Island", "Top"), settings.miniStyle, p) { settings.changeMiniStyle(it) }
+            SettingsCard("Player style", p) {
+                Segmented(listOf("Classic", "Dynamic Island"), settings.miniStyle, p) { settings.changeMiniStyle(it) }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    if (settings.miniStyle == 2)
-                        "A small black pill at the top centre: round cover and the song title. A long title scrolls in a loop and pauses each time it is back at the start. Tap to open the player."
-                    else if (settings.miniStyle == 1)
-                        "A black pill like the iPhone's Dynamic Island: small cover, live sound bars, play and next."
+                    if (settings.miniStyle == 1)
+                        "A fixed-size Dynamic Island at the top. It shows only the cover; tap it to open playback controls."
                     else
-                        "The glass card with cover, favorite, play and next buttons.",
+                        "The classic glass mini player with cover and playback controls.",
                     fontSize = 13.sp, color = p.secondary
                 )
+            }
+        }
+        item {
+            SettingsCard("Notification Dynamic Island", p) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Show notifications", color = p.text, fontWeight = FontWeight.Medium)
+                        Text("Show a cover preview when a notification arrives", color = p.secondary, fontSize = 12.sp)
+                    }
+                    Switch(checked = settings.noticeEnabled, onCheckedChange = settings::changeNoticeEnabled)
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("Panel size", color = p.text, fontSize = 13.sp)
+                Spacer(Modifier.height(6.dp))
+                Segmented(listOf("Compact", "Balanced", "Wide"), settings.noticeSize, p) { settings.changeNoticeSize(it) }
+                Spacer(Modifier.height(12.dp))
+                Text("Panel appearance", color = p.text, fontSize = 13.sp)
+                Spacer(Modifier.height(6.dp))
+                Segmented(listOf("Black", "Glass", "Accent"), settings.noticeTint, p) { settings.changeNoticeTint(it) }
+                Spacer(Modifier.height(8.dp))
+                Text("Each notification stays for 5 seconds. Tap its cover to read the description; the title is hidden.", fontSize = 12.sp, color = p.secondary)
             }
         }
         item {
@@ -200,6 +219,19 @@ fun SettingsTab(
         item {
             SettingsCard("Sort songs by", p) {
                 Segmented(SortLabels, settings.sort, p) { settings.changeSort(it) }
+            }
+        }
+        item {
+            SettingsCard("Tab bar style", p) {
+                Segmented(listOf("Floating", "Classic"), settings.tabBarStyle, p) { settings.changeTabBarStyle(it) }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    if (settings.tabBarStyle == 0)
+                        "Floating glass capsule with the current animations."
+                    else
+                        "A solid rectangular bar attached to the bottom edge. It stays visible, has no glass effect, and the mini player docks directly above it. ",
+                    fontSize = 13.sp, color = p.secondary
+                )
             }
         }
         item {

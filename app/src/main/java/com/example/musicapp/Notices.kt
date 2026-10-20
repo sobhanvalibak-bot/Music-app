@@ -90,10 +90,15 @@ class NoticeListenerService : NotificationListenerService() {
         } catch (e: Exception) {
             sbn.packageName
         }
+        // Prefer the actual notification artwork/cover, falling back to the app icon.
         val icon = try {
-            pm.getApplicationIcon(sbn.packageName).toImageBitmap(96)
+            val cover = (extras.get(Notification.EXTRA_PICTURE) as? Bitmap)
+                ?: (extras.get(Notification.EXTRA_LARGE_ICON_BIG) as? Bitmap)
+                ?: (extras.get(Notification.EXTRA_LARGE_ICON) as? Bitmap)
+            if (cover != null) cover.toImageBitmap(128)
+            else pm.getApplicationIcon(sbn.packageName).toImageBitmap(96)
         } catch (e: Exception) {
-            null
+            try { pm.getApplicationIcon(sbn.packageName).toImageBitmap(96) } catch (_: Exception) { null }
         }
         val notice = Notice(sbn.key, appName, icon, title, text)
         main.post { NoticeBus.current = notice }
@@ -123,7 +128,14 @@ fun isNoticeAccessEnabled(context: Context): Boolean =
  * unless it is opened.
  */
 @Composable
-fun NoticeIsland(notice: Notice, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+fun NoticeIsland(
+    notice: Notice,
+    onDismiss: () -> Unit,
+    panelSize: Int = 1,
+    tint: Int = 0,
+    accent: Color = Color(0xFF0A84FF),
+    modifier: Modifier = Modifier
+) {
     val density = LocalDensity.current
     val statusH = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
     var expanded by remember(notice.key) { mutableStateOf(false) }
@@ -133,11 +145,16 @@ fun NoticeIsland(notice: Notice, onDismiss: () -> Unit, modifier: Modifier = Mod
     val onDismissS by rememberUpdatedState(onDismiss)
     val shape = RoundedCornerShape(if (expanded) 28.dp else 40.dp)
 
-    LaunchedEffect(notice.key, expanded) {
-        if (!expanded) {
-            delay(5000)
-            onDismissS()
-        }
+    // The timeout is always five seconds, even if the user opens the description.
+    LaunchedEffect(notice.key) {
+        delay(5000)
+        onDismissS()
+    }
+    val panelWidth = when (panelSize) { 0 -> 0.66f; 2 -> 1f; else -> 0.84f }
+    val panelColor = when (tint) {
+        1 -> Color(0xFF202024).copy(alpha = 0.88f)
+        2 -> accent.copy(alpha = 0.88f)
+        else -> Color.Black
     }
 
     Box(
@@ -186,55 +203,34 @@ fun NoticeIsland(notice: Notice, onDismiss: () -> Unit, modifier: Modifier = Mod
                     alpha = 1f - far * 0.8f
                 }
                 .widthIn(max = 420.dp)
-                .fillMaxWidth(if (expanded) 1f else 0.82f)
+                .fillMaxWidth(if (expanded) 1f else panelWidth)
                 .animateContentSize(spring(dampingRatio = 0.8f, stiffness = 400f))
                 .clip(shape)
-                .background(Color.Black)
-                .border(1.dp, Color.White.copy(alpha = 0.10f), shape)
+                .background(panelColor)
+                .border(1.dp, Color.White.copy(alpha = 0.14f), shape)
                 .padding(9.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(42.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.12f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (notice.icon != null) {
-                        Image(
-                            bitmap = notice.icon, contentDescription = null,
-                            contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        Text(
-                            notice.appName.firstOrNull()?.uppercase() ?: "?",
-                            color = Color.White, fontWeight = FontWeight.Bold
-                        )
-                    }
+            Box(
+                Modifier.fillMaxWidth().height(if (expanded) 72.dp else 48.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                if (notice.icon != null) {
+                    Image(
+                        bitmap = notice.icon, contentDescription = "Notification cover",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(if (expanded) 64.dp else 44.dp).clip(RoundedCornerShape(if (expanded) 16.dp else 13.dp))
+                    )
+                } else {
+                    Box(Modifier.size(if (expanded) 64.dp else 44.dp).clip(RoundedCornerShape(13.dp)).background(Color.White.copy(alpha = 0.12f)))
                 }
-                Spacer(Modifier.width(11.dp))
-                Text(
-                    notice.appName, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
-                    modifier = Modifier.weight(1f)
-                )
-                Spacer(Modifier.width(8.dp))
             }
-            if (expanded) {
-                Spacer(Modifier.height(10.dp))
-                Column(Modifier.padding(horizontal = 6.dp).padding(bottom = 6.dp)) {
-                    if (notice.title.isNotBlank()) {
-                        Text(
-                            notice.title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                            color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    if (notice.text.isNotBlank()) {
-                        Spacer(Modifier.height(3.dp))
-                        Text(
-                            notice.text, fontSize = 14.sp, color = Color.White.copy(alpha = 0.8f),
-                            maxLines = 8, overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
+            if (expanded && notice.text.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    notice.text, fontSize = 14.sp, color = Color.White.copy(alpha = 0.9f),
+                    maxLines = 8, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
+                )
             }
         }
     }

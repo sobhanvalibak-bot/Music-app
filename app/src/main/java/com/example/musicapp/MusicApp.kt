@@ -200,13 +200,14 @@ fun MusicApp(
 
     // Scrolling down: only the tab bar (and search button) fades out, and the mini player glides
     // down into the place the tab bar had. The mini player itself never fades.
+    val classicTabs = settings.tabBarStyle == 1
     val tabHide by animateFloatAsState(
-        if (barsShown) 0f else 1f,
+        if (classicTabs || barsShown) 0f else 1f,
         spring(dampingRatio = 0.85f, stiffness = 380f),
         label = "tabHide"
     )
     val miniDock by animateFloatAsState(
-        if (barsShown) 0f else 1f,
+        if (classicTabs || barsShown) 0f else 1f,
         spring(dampingRatio = 0.78f, stiffness = 300f),
         label = "miniDock"
     )
@@ -611,11 +612,12 @@ fun MusicApp(
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
+                .then(if (classicTabs) Modifier.fillMaxWidth().background(p.card) else Modifier)
                 .navigationBarsPadding()
-                .padding(bottom = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(bottom = if (classicTabs) 0.dp else 8.dp),
+            verticalArrangement = Arrangement.spacedBy(if (classicTabs) 0.dp else 8.dp)
         ) {
-            current?.takeIf { settings.miniStyle != 2 }?.let { song ->
+            current?.takeIf { settings.miniStyle == 0 }?.let { song ->
                 Box(
                     Modifier
                         .zIndex(1f) // always above the tab row, so it keeps taking touches
@@ -646,24 +648,25 @@ fun MusicApp(
                         },
                         canNext = { controller?.hasNextMediaItem() == true },
                         onFav = { profile.toggleFavorite(song.id) },
-                        style = settings.miniStyle
+                        style = settings.miniStyle,
+                        flatDock = classicTabs
                     )
                 }
             }
-            val tabsHidden = !barsShown
+            val tabsHidden = !classicTabs && !barsShown
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp)
+                    .then(if (classicTabs) Modifier else Modifier.padding(horizontal = 14.dp))
                     .onSizeChanged { tabRowH = it.height }
-                    .graphicsLayer {
-                        // only fades (with a tiny shrink), it does not slide away
+                    .then(if (classicTabs) Modifier else Modifier.graphicsLayer {
+                        // Floating mode fades away on scroll; classic mode stays fixed and visible.
                         alpha = (1f - tabHide) * (1f - imeHide)
                         val sc = 1f - 0.05f * tabHide
                         scaleX = sc
                         scaleY = sc
                         translationY = imeHide * (size.height + 120.dp.toPx())
-                    }
+                    })
                     // a faded tab bar must not take touches
                     .pointerInput(tabsHidden) {
                         if (tabsHidden) {
@@ -690,40 +693,61 @@ fun MusicApp(
                     },
                     p = p,
                     photo = profile.photo,
-                    profileName = profile.name
+                    profileName = profile.name,
+                    classic = classicTabs
                 )
-                SearchButton(active = searching, p = p) {
+                SearchButton(active = searching, p = p, classic = classicTabs) {
                     barsVisible = true
                     searching = true
                 }
             }
         }
 
-        // Notification arrives: the island drops lower, shows the app icon and the app name
+        // Incoming notifications use the same top area as the cover-only Dynamic Island.
         val notice = NoticeBus.current
         var shownNotice by remember { mutableStateOf<Notice?>(null) }
         LaunchedEffect(notice) { if (notice != null) shownNotice = notice }
 
-        // Top island: small pill at the top centre (mini player style 3)
-        if (settings.miniStyle == 2) {
+        if (settings.miniStyle == 1) {
             current?.let { song ->
                 AnimatedVisibility(
-                    visible = notice == null,
+                    visible = notice == null || !settings.noticeEnabled,
                     enter = fadeIn(),
                     exit = fadeOut(),
                     modifier = Modifier.align(Alignment.TopCenter)
                 ) {
-                    TopIsland(song = song, p = p, onOpen = { showPlayer = true })
+                    TopIsland(
+                        song = song,
+                        p = p,
+                        isPlaying = isPlaying,
+                        isFav = favSet.contains(song.id),
+                        shuffle = shuffle,
+                        repeatMode = repeatMode,
+                        onToggle = { controller?.let { if (it.isPlaying) it.pause() else it.play() } },
+                        onNext = { controller?.let { if (it.hasNextMediaItem()) it.seekToNextMediaItem() } },
+                        onPrev = { controller?.let { if (it.hasPreviousMediaItem()) it.seekToPreviousMediaItem() else it.seekTo(0) } },
+                        onFav = { profile.toggleFavorite(song.id) },
+                        onShuffle = { controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } },
+                        onRepeat = { controller?.let { it.repeatMode = when (it.repeatMode) { Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL; Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE; else -> Player.REPEAT_MODE_OFF } } }
+                    )
                 }
             }
         }
         AnimatedVisibility(
-            visible = notice != null,
+            visible = notice != null && settings.noticeEnabled,
             enter = slideInVertically(spring(dampingRatio = 0.7f, stiffness = 300f)) { -it * 2 } + fadeIn(),
             exit = slideOutVertically { -it * 2 } + fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter).zIndex(2f)
         ) {
-            shownNotice?.let { NoticeIsland(it, onDismiss = { NoticeBus.dismiss() }) }
+            shownNotice?.let {
+                NoticeIsland(
+                    notice = it,
+                    onDismiss = { NoticeBus.dismiss() },
+                    panelSize = settings.noticeSize,
+                    tint = settings.noticeTint,
+                    accent = p.accent
+                )
+            }
         }
 
         // Full player
