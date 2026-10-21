@@ -51,6 +51,8 @@ dependencies {
     implementation("androidx.media3:media3-session:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
     implementation("androidx.media3:media3-datasource:1.4.1")
+    // SoundCloud plays as HLS playlists
+    implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
     // Online search + streams (YouTube) without any API key. If this tag is not found on JitPack,
     // use the newest tag from https://github.com/TeamNewPipe/NewPipeExtractor/releases
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
