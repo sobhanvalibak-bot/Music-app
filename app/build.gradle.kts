@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.musicapp"
         minSdk = 24
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
     }
     // One fixed key for every build, so a new APK installs over the old one (an update)
     // and keeps the app's data instead of failing with a signature conflict.
@@ -53,7 +53,7 @@ dependencies {
     implementation("androidx.media3:media3-datasource:1.4.1")
     // Online search + streams (YouTube) without any API key. If this tag is not found on JitPack,
     // use the newest tag from https://github.com/TeamNewPipe/NewPipeExtractor/releases
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.24.8")
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     // Reads and writes the real tags inside mp3 / m4a / flac / ogg files (Android build of jaudiotagger)
