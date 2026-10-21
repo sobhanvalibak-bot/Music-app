@@ -74,8 +74,6 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        AppLog.init(this)
-        YoutubeAuth.init(this)
         val p = ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(
@@ -127,10 +125,6 @@ class PlaybackService : MediaSessionService() {
                 reason: Int
             ) {
                 if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SKIP) {
-                    AppLog.i(
-                        "service",
-                        "jump ${oldPosition.mediaItemIndex}@${oldPosition.positionMs} -> ${newPosition.mediaItemIndex}@${newPosition.positionMs} (reason $reason, fading=$fading)"
-                    )
                 }
             }
 
@@ -243,7 +237,6 @@ class PlaybackService : MediaSessionService() {
         t.volume = 1f
         t.playWhenReady = true
 
-        AppLog.i("crossfade", "fade out of ${item.mediaMetadata.title} at $pos ms, $remaining ms left")
         fading = true
         fadeElapsed = 0L
         fadeTotal = remaining.coerceAtLeast(200L)

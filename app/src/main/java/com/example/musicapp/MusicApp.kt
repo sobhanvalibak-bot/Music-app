@@ -236,6 +236,7 @@ fun MusicApp(
     var query by remember { mutableStateOf("") }
     // the Misc page (SMS) and whether one of its chats is open (then it covers the tab bar)
     var misc by remember { mutableStateOf(false) }
+    var miscTab by remember { mutableIntStateOf(0) }   // 0 = SMS, 1 = Calls
     var miscThread by remember { mutableStateOf(false) }
 
     BackHandler(enabled = searching) { searching = false }
@@ -303,8 +304,6 @@ fun MusicApp(
     }
 
     val songs = remember(songsVersion, OnlineDownloader.version) { loadSongs(context) }
-    remember { AppLog.init(context) }
-    remember { YoutubeAuth.init(context) }
     remember { OnlineRegistry.init(context) } // online songs saved earlier (favorites, playlists, recent)
     // songs on the device plus the online songs the app has seen
     val byId: Map<Long, Song> = remember(songs) { SongIndex(songs.associateBy { it.id }) }
@@ -390,11 +389,6 @@ fun MusicApp(
                     // It never jumps to a song from the phone by itself.
                     val mid = c.currentMediaItem?.mediaId?.toLongOrNull()
                     val song = mid?.let { byId[it] } ?: current
-                    AppLog.e(
-                        "player",
-                        "error ${error.errorCodeName} on \"${song?.title ?: mid}\" (${if (song?.isOnline == true) song.sourceName else "device"})",
-                        error
-                    )
                     if (song == null || !song.isOnline) return
                     val page = song.remoteId.orEmpty()
                     val reason = generateSequence<Throwable>(error) { it.cause }
@@ -410,9 +404,7 @@ fun MusicApp(
                         return
                     }
                     onlineRetryId = null
-                    val hint = if (blocked && !YoutubeAuth.signedIn) "\nTip: Settings > YouTube account > Sign in" else ""
                     if (song.canWatch) {
-                        AppLog.i("fallback", "YouTube failed (${reason.take(60)}), looking on SoundCloud")
                         Toast.makeText(context, "Looking for this song on SoundCloud...", Toast.LENGTH_SHORT).show()
                         val ui = android.os.Handler(android.os.Looper.getMainLooper())
                         Thread {
@@ -428,12 +420,12 @@ fun MusicApp(
                                     c.play()
                                     Toast.makeText(context, "Playing from ${altSong.sourceName}", Toast.LENGTH_SHORT).show()
                                 } else {
-                                    Toast.makeText(context, reason.take(140) + hint, Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, reason.take(140), Toast.LENGTH_LONG).show()
                                 }
                             }
                         }.start()
                     } else {
-                        Toast.makeText(context, reason.take(140) + hint, Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, reason.take(140), Toast.LENGTH_LONG).show()
                     }
                 }
                 override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing; if (playing) onlineRetryId = null }
@@ -457,7 +449,6 @@ fun MusicApp(
                             else -> "list changed"
                         }
                         val t = id?.let { byId[it] }
-                        AppLog.i("play", "now: ${t?.title ?: id} (${if (t?.isOnline == true) t.sourceName else "device"}) · $why")
                     }
                     // new song: the bar starts again from the real position, not from the old song's
                     position = c.currentPosition
@@ -487,7 +478,6 @@ fun MusicApp(
     fun playOne(song: Song, video: Boolean = false) {
         val c = controller ?: return
         OnlineRegistry.remember(song)
-        AppLog.i("play", "request: ${song.title} (${if (song.isOnline) song.sourceName else "device"})${if (video) " with video" else ""}")
         val item = song.toMediaItem(video)
         if (c.mediaItemCount == 0) {
             c.setMediaItem(item)
@@ -899,12 +889,16 @@ fun MusicApp(
         // Misc page: SMS inbox and chats. A chat covers everything, the inbox sits under the bars.
         if (misc) {
             Box(Modifier.fillMaxSize().zIndex(if (miscThread) 1f else 0f)) {
-                SmsMiscScreen(
-                    p = p,
-                    topPad = topPad,
-                    bottomPad = bottomPad,
-                    onThreadOpen = { miscThread = it }
-                )
+                if (miscTab == 0) {
+                    SmsMiscScreen(
+                        p = p,
+                        topPad = topPad,
+                        bottomPad = bottomPad,
+                        onThreadOpen = { miscThread = it }
+                    )
+                } else {
+                    CallsScreen(p = p, topPad = topPad, bottomPad = bottomPad)
+                }
             }
         }
 
@@ -975,30 +969,56 @@ fun MusicApp(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                GlassTabBar(
-                    modifier = Modifier.weight(1f),
-                    selected = if (searching || misc) -1 else tab,
-                    onSelect = {
-                        searching = false
-                        misc = false
-                        sub = Sub.None
-                        artistPage = null
-                        barsVisible = true
-                        tab = it
-                    },
-                    p = p,
-                    photo = profile.photo,
-                    profileName = profile.name
-                )
-                MiscButton(
-                    active = misc,
-                    p = p,
-                    onClick = {
-                        barsVisible = true
-                        searching = false
-                        misc = true
-                    }
-                )
+                if (misc) {
+                    // Misc mode: the four music tabs turn into SMS and Calls, and the round button goes back to Songs
+                    GlassTabBar(
+                        modifier = Modifier.weight(1f),
+                        selected = if (searching) -1 else miscTab,
+                        onSelect = {
+                            miscTab = it
+                            miscThread = false
+                            barsVisible = true
+                        },
+                        p = p,
+                        photo = profile.photo,
+                        profileName = profile.name,
+                        customTabs = MiscTabs
+                    )
+                    MiscButton(
+                        active = false,
+                        p = p,
+                        songs = true,
+                        onClick = {
+                            barsVisible = true
+                            searching = false
+                            misc = false
+                        }
+                    )
+                } else {
+                    GlassTabBar(
+                        modifier = Modifier.weight(1f),
+                        selected = if (searching) -1 else tab,
+                        onSelect = {
+                            searching = false
+                            sub = Sub.None
+                            artistPage = null
+                            barsVisible = true
+                            tab = it
+                        },
+                        p = p,
+                        photo = profile.photo,
+                        profileName = profile.name
+                    )
+                    MiscButton(
+                        active = false,
+                        p = p,
+                        onClick = {
+                            barsVisible = true
+                            searching = false
+                            misc = true
+                        }
+                    )
+                }
             }
         }
 

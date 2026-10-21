@@ -165,20 +165,9 @@ private class NpDownloader : Downloader() {
             builder.removeHeader(name)
             values.forEach { builder.addHeader(name, it) }
         }
-        // signed in to YouTube (Settings): send the account cookies with YouTube's own requests
-        val account = YoutubeAuth.cookie
-        if (account != null) {
-            val host = android.net.Uri.parse(url).host.orEmpty()
-            if (host == "youtube.com" || host.endsWith(".youtube.com")) {
-                val existing = request.headers().entries
-                    .firstOrNull { it.key.equals("Cookie", true) }?.value?.joinToString("; ")
-                builder.header("Cookie", listOfNotNull(existing, account).joinToString("; "))
-            }
-        }
         client.newCall(builder.build()).execute().use { resp ->
             if (resp.code == 429) throw ReCaptchaException("reCaptcha Challenge requested", url)
             val text = resp.body?.string()
-            if (resp.code >= 400) AppLog.w("net", "HTTP ${resp.code} ${android.net.Uri.parse(url).host}${android.net.Uri.parse(url).path.orEmpty().take(40)}")
             return NpResponse(resp.code, resp.message, resp.headers.toMultimap(), text, resp.request.url.toString())
         }
     }
@@ -323,7 +312,6 @@ object OnlineEngine {
                 if (e is java.io.InterruptedIOException || e.cause is java.io.InterruptedIOException) throw e
                 if (isBlocked(e.message)) throw e
                 last = e
-                AppLog.w("resolve", "try ${n + 1} failed (${e.javaClass.simpleName}), ${if (n < 2) "trying again" else "giving up"}")
                 if (n < 2) {
                     try {
                         Thread.sleep(700L)
@@ -333,14 +321,6 @@ object OnlineEngine {
                     }
                 }
             }
-        }
-        // "Could not get any stream" hides the real reason: ask the extractor directly and log what it says
-        try {
-            val ex = NewPipe.getServiceByUrl(pageUrl).getStreamExtractor(pageUrl)
-            ex.fetchPage()
-            AppLog.w("resolve", "direct check: ${ex.audioStreams.size} audio streams, ${ex.videoStreams.size} video streams")
-        } catch (t: Throwable) {
-            AppLog.e("resolve", "real reason: ${t.javaClass.simpleName}: ${t.message}", t)
         }
         throw last ?: IOException("Could not load this song")
     }
@@ -425,9 +405,7 @@ object OnlineEngine {
         urlCache[key]?.let { if (it.second > now) return it.first }
         try {
             ensureInit()
-            AppLog.i("resolve", "${sourceNameOf(pageUrl)} video=$video signedIn=${YoutubeAuth.signedIn}\n$pageUrl")
             val info = getInfo(pageUrl)
-            AppLog.i("resolve", describeStreams(info))
             val tried = mutableListOf<String>()
             var found: String? = null
 
@@ -436,11 +414,9 @@ object OnlineEngine {
                 val problem = probe(url)
                 if (problem == null) {
                     found = url
-                    AppLog.i("resolve", "stream ok (${hostOf(url)})")
                     return true
                 }
                 tried += problem
-                AppLog.w("resolve", "stream refused: $problem (${hostOf(url)})")
                 return false
             }
 
@@ -469,10 +445,8 @@ object OnlineEngine {
             urlCache[key] = url to (now + URL_TTL_MS)
             return url
         } catch (e: IOException) {
-            AppLog.e("resolve", "failed: ${e.message}", e.cause)
             throw e
         } catch (e: Exception) {
-            AppLog.e("resolve", "failed (${e.javaClass.simpleName})", e)
             throw IOException(friendly(e), e)
         }
     }
@@ -485,9 +459,7 @@ object OnlineEngine {
     private fun audioSourceLocked(pageUrl: String): AudioSource {
         try {
             ensureInit()
-            AppLog.i("download", "looking for a file: ${sourceNameOf(pageUrl)} signedIn=${YoutubeAuth.signedIn}\n$pageUrl")
             val info = getInfo(pageUrl)
-            AppLog.i("download", describeStreams(info))
             val tried = mutableListOf<String>()
             val list = audioCandidates(info, DeliveryMethod.PROGRESSIVE_HTTP).map { it to false } +
                 audioCandidates(info, DeliveryMethod.HLS, mp3First = true).map { it to true }
@@ -508,10 +480,8 @@ object OnlineEngine {
                 else "The server refused the file (${tried.last()})"
             )
         } catch (e: IOException) {
-            AppLog.e("resolve", "failed: ${e.message}", e.cause)
             throw e
         } catch (e: Exception) {
-            AppLog.e("resolve", "failed (${e.javaClass.simpleName})", e)
             throw IOException(friendly(e), e)
         }
     }
@@ -540,7 +510,6 @@ object OnlineEngine {
                     kotlin.math.abs(r.durationMs - durationMs) <= 10_000L
                 titleOk && durOk
             }
-            AppLog.i("fallback", "${OnlineSources[source]}: ${list.size} results for \"$artist $title\" -> ${hit?.title ?: "no match"}")
             if (hit != null) return hit
         }
         return null

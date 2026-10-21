@@ -122,7 +122,8 @@ import kotlin.math.sin
 
 enum class SmsIconKind {
     Grid, Send, Reply, Star, StarFilled, Pin, PinFilled, Copy, Trash, Eye, EyeOff,
-    Message, Contacts, Check, ChevronUp, Dot, Bolt, Burst
+    Message, Contacts, Check, ChevronUp, Dot, Bolt, Burst,
+    Phone, Backspace, Keypad, Clock, ArrowIn, ArrowOut
 }
 
 @Composable
@@ -259,6 +260,64 @@ fun SmsIcon(kind: SmsIconKind, color: Color, modifier: Modifier = Modifier) {
                 }
                 drawPath(path, color, style = st)
             }
+            SmsIconKind.Phone -> {
+                val path = Path().apply {
+                    moveTo(w * 0.26f, h * 0.14f)
+                    lineTo(w * 0.40f, h * 0.14f)
+                    lineTo(w * 0.46f, h * 0.34f)
+                    lineTo(w * 0.36f, h * 0.42f)
+                    cubicTo(w * 0.42f, h * 0.56f, w * 0.50f, h * 0.62f, w * 0.62f, h * 0.68f)
+                    lineTo(w * 0.70f, h * 0.58f)
+                    lineTo(w * 0.90f, h * 0.64f)
+                    lineTo(w * 0.90f, h * 0.78f)
+                    cubicTo(w * 0.90f, h * 0.86f, w * 0.84f, h * 0.90f, w * 0.76f, h * 0.90f)
+                    cubicTo(w * 0.44f, h * 0.86f, w * 0.14f, h * 0.56f, w * 0.10f, h * 0.24f)
+                    cubicTo(w * 0.10f, h * 0.18f, w * 0.18f, h * 0.14f, w * 0.26f, h * 0.14f)
+                    close()
+                }
+                drawPath(path, color, style = st)
+            }
+            SmsIconKind.Backspace -> {
+                val path = Path().apply {
+                    moveTo(w * 0.36f, h * 0.22f)
+                    lineTo(w * 0.86f, h * 0.22f)
+                    lineTo(w * 0.86f, h * 0.78f)
+                    lineTo(w * 0.36f, h * 0.78f)
+                    lineTo(w * 0.1f, h * 0.5f)
+                    close()
+                }
+                drawPath(path, color, style = st)
+                drawLine(color, Offset(w * 0.5f, h * 0.38f), Offset(w * 0.7f, h * 0.62f), sw, StrokeCap.Round)
+                drawLine(color, Offset(w * 0.7f, h * 0.38f), Offset(w * 0.5f, h * 0.62f), sw, StrokeCap.Round)
+            }
+            SmsIconKind.Keypad -> {
+                for (cx in listOf(0.2f, 0.5f, 0.8f)) for (cy in listOf(0.16f, 0.4f, 0.64f, 0.88f)) {
+                    drawCircle(color, radius = w * 0.07f, center = Offset(w * cx, h * cy))
+                }
+            }
+            SmsIconKind.Clock -> {
+                drawCircle(color, radius = w * 0.4f, center = Offset(w * 0.5f, h * 0.5f), style = st)
+                drawLine(color, Offset(w * 0.5f, h * 0.5f), Offset(w * 0.5f, h * 0.28f), sw, StrokeCap.Round)
+                drawLine(color, Offset(w * 0.5f, h * 0.5f), Offset(w * 0.66f, h * 0.58f), sw, StrokeCap.Round)
+            }
+            SmsIconKind.ArrowIn -> {
+                drawLine(color, Offset(w * 0.78f, h * 0.22f), Offset(w * 0.24f, h * 0.76f), sw, StrokeCap.Round)
+                val head = Path().apply {
+                    moveTo(w * 0.24f, h * 0.38f)
+                    lineTo(w * 0.24f, h * 0.76f)
+                    lineTo(w * 0.62f, h * 0.76f)
+                }
+                drawPath(head, color, style = st)
+            }
+            SmsIconKind.ArrowOut -> {
+                drawLine(color, Offset(w * 0.24f, h * 0.76f), Offset(w * 0.78f, h * 0.22f), sw, StrokeCap.Round)
+                val head = Path().apply {
+                    moveTo(w * 0.4f, h * 0.22f)
+                    lineTo(w * 0.78f, h * 0.22f)
+                    lineTo(w * 0.78f, h * 0.6f)
+                }
+                drawPath(head, color, style = st)
+            }
             SmsIconKind.Burst -> {
                 for (i in 0 until 8) {
                     val a = (i * Math.PI / 4).toFloat()
@@ -276,7 +335,7 @@ fun SmsIcon(kind: SmsIconKind, color: Color, modifier: Modifier = Modifier) {
 
 /** Round glass Misc button that sits next to the tab bar. */
 @Composable
-fun MiscButton(active: Boolean, p: Palette, onClick: () -> Unit) {
+fun MiscButton(active: Boolean, p: Palette, onClick: () -> Unit, songs: Boolean = false) {
     var pressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         if (pressed) 0.88f else if (active) 1.08f else 1f,
@@ -303,7 +362,15 @@ fun MiscButton(active: Boolean, p: Palette, onClick: () -> Unit) {
             },
         contentAlignment = Alignment.Center
     ) {
-        SmsIcon(SmsIconKind.Grid, tint, Modifier.size(24.dp))
+        if (songs) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                GlyphIcon(Glyph.Note, tint, Modifier.size(22.dp))
+                Spacer(Modifier.height(1.dp))
+                Text("Songs", color = tint, fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            }
+        } else {
+            SmsIcon(SmsIconKind.Grid, tint, Modifier.size(24.dp))
+        }
     }
 }
 
@@ -315,7 +382,7 @@ private val SmsAvatarColors = listOf(
 )
 
 @Composable
-private fun SmsAvatar(title: String, size: Dp, modifier: Modifier = Modifier) {
+internal fun SmsAvatar(title: String, size: Dp, modifier: Modifier = Modifier) {
     val c = SmsAvatarColors[(title.hashCode() and 0x7fffffff) % SmsAvatarColors.size]
     val first = title.trim().firstOrNull()
     Box(
@@ -342,8 +409,8 @@ private fun smsListTime(ms: Long): String {
     val d = smsDayKey(System.currentTimeMillis()) - smsDayKey(ms)
     return when {
         d == 0 -> smsClock(ms)
-        d == 1 -> "دیروز"
-        d in 2..6 -> SimpleDateFormat("EEEE", Locale("fa")).format(Date(ms))
+        d == 1 -> "Yesterday"
+        d in 2..6 -> SimpleDateFormat("EEEE", Locale.ENGLISH).format(Date(ms))
         else -> SimpleDateFormat("yyyy/MM/dd", Locale.getDefault()).format(Date(ms))
     }
 }
@@ -351,16 +418,16 @@ private fun smsListTime(ms: Long): String {
 private fun smsDayLabel(ms: Long): String {
     val d = smsDayKey(System.currentTimeMillis()) - smsDayKey(ms)
     return when (d) {
-        0 -> "امروز"
-        1 -> "دیروز"
-        else -> SimpleDateFormat("d MMMM yyyy", Locale("fa")).format(Date(ms))
+        0 -> "Today"
+        1 -> "Yesterday"
+        else -> SimpleDateFormat("d MMMM yyyy", Locale.ENGLISH).format(Date(ms))
     }
 }
 
 private fun smsCopy(context: Context, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     cm.setPrimaryClip(ClipData.newPlainText("sms", text))
-    if (Build.VERSION.SDK_INT < 33) Toast.makeText(context, "کپی شد", Toast.LENGTH_SHORT).show()
+    if (Build.VERSION.SDK_INT < 33) Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
 }
 
 /** Press: shrinks a little under the finger and springs back; long press gives a haptic tick. */
@@ -479,7 +546,7 @@ fun SmsMiscScreen(p: Palette, topPad: Dp, bottomPad: Dp, onThreadOpen: (Boolean)
     val settingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         canRead = smsCanRead(context)
     }
-    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+    run {
         Box(Modifier.fillMaxSize().background(p.bgBrush)) {
             if (!canRead) {
                 SmsPermissionPage(p, topPad, bottomPad) {
@@ -517,18 +584,18 @@ private fun SmsPermissionPage(p: Palette, topPad: Dp, bottomPad: Dp, onAllow: ()
             contentAlignment = Alignment.Center
         ) { SmsIcon(SmsIconKind.Message, p.accent, Modifier.size(42.dp)) }
         Spacer(Modifier.height(16.dp))
-        Text("پیام‌ها", color = p.text, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.staggerIn(1))
+        Text("Messages", color = p.text, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.staggerIn(1))
         Spacer(Modifier.height(6.dp))
         Text(
-            "برای نمایش و ارسال پیامک‌ها، برنامه به این دسترسی‌ها نیاز دارد.",
+            "To show and send text messages, the app needs these permissions.",
             color = p.secondary, fontSize = 14.sp, lineHeight = 22.sp,
             modifier = Modifier.staggerIn(2)
         )
         Spacer(Modifier.height(22.dp))
         listOf(
-            Triple(SmsIconKind.Message, "خواندن SMS", "نمایش پیامک‌های دریافتی"),
-            Triple(SmsIconKind.Contacts, "مخاطبین", "نمایش نام فرستنده به‌جای شماره"),
-            Triple(SmsIconKind.Send, "ارسال SMS", "پاسخ دادن از داخل برنامه")
+            Triple(SmsIconKind.Message, "Read SMS", "Show your received messages"),
+            Triple(SmsIconKind.Contacts, "Contacts", "Show the sender's name instead of the number"),
+            Triple(SmsIconKind.Send, "Send SMS", "Reply from inside the app")
         ).forEachIndexed { i, (icon, title, sub) ->
             Row(
                 Modifier.staggerIn(3 + i).fillMaxWidth().padding(bottom = 8.dp)
@@ -548,7 +615,7 @@ private fun SmsPermissionPage(p: Palette, topPad: Dp, bottomPad: Dp, onAllow: ()
             Modifier.staggerIn(6).fillMaxWidth().bounceClick { onAllow() }
                 .clip(RoundedCornerShape(16.dp)).background(p.accent).padding(vertical = 14.dp),
             contentAlignment = Alignment.Center
-        ) { Text("اجازه دادن", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
+        ) { Text("Allow", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
     }
 }
 
@@ -616,9 +683,9 @@ private fun SmsInbox(p: Palette, topPad: Dp, bottomPad: Dp, onThreadOpen: (Boole
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("پیام‌ها", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = p.text)
+                        Text("Messages", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = p.text)
                         Text(
-                            if (unreadTotal > 0) "$unreadTotal خوانده‌نشده" else "${threads.size} گفتگو",
+                            if (unreadTotal > 0) "$unreadTotal unread" else "${threads.size} chats",
                             fontSize = 13.sp, color = p.secondary
                         )
                     }
@@ -633,7 +700,7 @@ private fun SmsInbox(p: Palette, topPad: Dp, bottomPad: Dp, onThreadOpen: (Boole
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).staggerIn(1),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf("همه", "مخاطبین", "تبلیغات", "مخفی").forEachIndexed { i, label ->
+                    listOf("All", "Contacts", "Promotions", "Hidden").forEachIndexed { i, label ->
                         val on = filter == i
                         val bg by animateColorAsState(if (on) p.accent else p.selectedPill, label = "segBg")
                         Box(
@@ -651,7 +718,7 @@ private fun SmsInbox(p: Palette, topPad: Dp, bottomPad: Dp, onThreadOpen: (Boole
             if (loaded && visible.isEmpty()) {
                 item {
                     Text(
-                        if (filter == 3) "گفتگوی مخفی‌ای نداری" else "پیامی نیست",
+                        if (filter == 3) "No hidden chats" else "No messages",
                         color = p.secondary, fontSize = 15.sp,
                         modifier = Modifier.fillMaxWidth().padding(top = 60.dp),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -711,24 +778,24 @@ private fun SmsInbox(p: Palette, topPad: Dp, bottomPad: Dp, onThreadOpen: (Boole
                 p = p,
                 onDismiss = { menuThread = null },
                 items = buildList {
-                    add(SmsMenuItem(if (pinned) "برداشتن پین" else "پین کردن", if (pinned) SmsIconKind.PinFilled else SmsIconKind.Pin) {
+                    add(SmsMenuItem(if (pinned) "Unpin" else "Pin", if (pinned) SmsIconKind.PinFilled else SmsIconKind.Pin) {
                         store.toggleThreadPin(mt.id); menuThread = null
                     })
-                    add(SmsMenuItem(if (hidden) "نمایش دوباره" else "مخفی کردن", if (hidden) SmsIconKind.Eye else SmsIconKind.EyeOff) {
+                    add(SmsMenuItem(if (hidden) "Unhide" else "Hide", if (hidden) SmsIconKind.Eye else SmsIconKind.EyeOff) {
                         store.toggleThreadHidden(mt.id); menuThread = null
                     })
-                    if (mt.unread > 0) add(SmsMenuItem("خوانده شد", SmsIconKind.Check) {
+                    if (mt.unread > 0) add(SmsMenuItem("Mark as read", SmsIconKind.Check) {
                         store.markRead(mt.id); menuThread = null
                     })
-                    add(SmsMenuItem("کپی شماره", SmsIconKind.Copy) {
+                    add(SmsMenuItem("Copy number", SmsIconKind.Copy) {
                         smsCopy(context, mt.address); menuThread = null
                     })
-                    add(SmsMenuItem("حذف گفتگو", SmsIconKind.Trash, danger = true) {
+                    add(SmsMenuItem("Delete chat", SmsIconKind.Trash, danger = true) {
                         store.removeAll(all.filter { smsThreadId(it.address) == mt.id }.map { it.key })
                         menuThread = null
                     })
                 },
-                footer = "حذف فقط از داخل همین برنامه انجام می‌شه، پیامک‌ها روی گوشی می‌مونن."
+                footer = "Deleting only happens inside this app. The messages stay on your phone."
             ) {
                 Box(Modifier.width(300.dp).clip(RoundedCornerShape(16.dp)).background(p.card)) {
                     SmsThreadRow(mt, p, pinned, onClick = {}, onLong = {})
@@ -760,7 +827,7 @@ private fun SmsThreadRow(t: SmsThread, p: Palette, pinned: Boolean, onClick: () 
                 }
             }
             Text(
-                (if (t.last.sent) "تو: " else "") + t.last.body.replace('\n', ' '),
+                (if (t.last.sent) "You: " else "") + t.last.body.replace('\n', ' '),
                 color = p.secondary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 style = LocalTextStyle.current.copy(textDirection = TextDirection.Content)
             )
@@ -792,13 +859,13 @@ private fun SmsStarredPage(
                         contentAlignment = Alignment.Center
                     ) { GlyphIcon(Glyph.Back, p.accent, Modifier.size(20.dp).graphicsLayer { scaleX = -1f }) }
                     Spacer(Modifier.width(12.dp))
-                    Text("ستاره‌دارها", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = p.text)
+                    Text("Starred", fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = p.text)
                 }
             }
             if (starred.isEmpty()) {
                 item {
                     Text(
-                        "هنوز پیامی ستاره‌دار نکردی.\nروی یه پیام نگه دار و «ستاره‌دار کردن» رو بزن.",
+                        "You haven't starred any messages yet.\nHold a message and tap \"Star\".",
                         color = p.secondary, fontSize = 14.sp, lineHeight = 22.sp,
                         modifier = Modifier.fillMaxWidth().padding(top = 60.dp, start = 30.dp, end = 30.dp),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -935,7 +1002,7 @@ private fun SmsBubble(
                 ) {
                     SmsIcon(SmsIconKind.Copy, fg, Modifier.size(14.dp))
                     Spacer(Modifier.width(5.dp))
-                    Text("کپی کد", color = fg, fontSize = 12.sp)
+                    Text("Copy code", color = fg, fontSize = 12.sp)
                 }
             }
             Row(Modifier.align(Alignment.End).padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1037,14 +1104,14 @@ private fun SmsThreadScreen(
         text = ""
         replyTo = null
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        if (!ok) Toast.makeText(context, "ارسال نشد", Toast.LENGTH_SHORT).show()
+        if (!ok) Toast.makeText(context, "Not sent", Toast.LENGTH_SHORT).show()
         scope.launch { listState.animateScrollToItem(0) }
     }
     val sendNow by rememberUpdatedState<(String) -> Unit> { fx -> doSend(fx) }
     LaunchedEffect(retry) {
         if (retry > 0) {
             if (smsCanSend(context)) sendNow(pendingFx)
-            else Toast.makeText(context, "بدون اجازه ارسال SMS نمی‌شه پیام فرستاد", Toast.LENGTH_LONG).show()
+            else Toast.makeText(context, "Messages can't be sent without the SMS permission", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -1076,7 +1143,7 @@ private fun SmsThreadScreen(
                                     starred = store.isStarred(m.key), pinned = store.isPinned(m.key),
                                     fresh = m.key == freshKey || (!m.sent && m.date > openedAt && System.currentTimeMillis() - m.date < 5000L),
                                     flash = flashKey == m.key,
-                                    status = if (m.key == lastSentKey) (if (m.failed) "ارسال نشد" else "ارسال شد") else null,
+                                    status = if (m.key == lastSentKey) (if (m.failed) "Not sent" else "Sent") else null,
                                     onLong = { menuMsg = m },
                                     onCode = { c -> smsCopy(context, c) }
                                 )
@@ -1154,7 +1221,7 @@ private fun SmsThreadScreen(
                     enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()
                 ) {
                     Text(
-                        "اول یه پیام بنویس", color = Color(0xFFFF6B6B), fontSize = 12.sp,
+                        "Write a message first", color = Color(0xFFFF6B6B), fontSize = 12.sp,
                         modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
@@ -1173,7 +1240,7 @@ private fun SmsThreadScreen(
                         SmsIcon(SmsIconKind.Reply, p.accent, Modifier.size(18.dp))
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("پاسخ به", color = p.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Reply to", color = p.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                             Text(
                                 r?.body?.replace('\n', ' ').orEmpty(), color = p.secondary, fontSize = 12.sp, maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -1189,7 +1256,7 @@ private fun SmsThreadScreen(
                     Box(
                         Modifier.fillMaxWidth().height(46.dp).clip(RoundedCornerShape(23.dp)).background(p.selectedPill),
                         contentAlignment = Alignment.Center
-                    ) { Text("این فرستنده پاسخ نمی‌گیرد", color = p.secondary, fontSize = 13.sp) }
+                    ) { Text("This sender can't receive replies", color = p.secondary, fontSize = 13.sp) }
                 } else {
                     val shape = RoundedCornerShape(23.dp)
                     val has = text.isNotBlank()
@@ -1207,7 +1274,7 @@ private fun SmsThreadScreen(
                             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 52.dp, top = 13.dp, bottom = 13.dp),
                             decorationBox = { inner ->
                                 Box {
-                                    if (text.isEmpty()) Text("پیام", color = p.secondary, fontSize = 15.sp)
+                                    if (text.isEmpty()) Text("Message", color = p.secondary, fontSize = 15.sp)
                                     inner()
                                 }
                             }
@@ -1254,17 +1321,17 @@ private fun SmsThreadScreen(
                 p = p,
                 onDismiss = { menuMsg = null },
                 items = buildList {
-                    if (canReply) add(SmsMenuItem("پاسخ", SmsIconKind.Reply) { replyTo = mm; menuMsg = null })
-                    add(SmsMenuItem("کپی", SmsIconKind.Copy) { smsCopy(context, mm.body); menuMsg = null })
-                    add(SmsMenuItem(if (starred) "برداشتن ستاره" else "ستاره‌دار کردن", if (starred) SmsIconKind.StarFilled else SmsIconKind.Star) {
+                    if (canReply) add(SmsMenuItem("Reply", SmsIconKind.Reply) { replyTo = mm; menuMsg = null })
+                    add(SmsMenuItem("Copy", SmsIconKind.Copy) { smsCopy(context, mm.body); menuMsg = null })
+                    add(SmsMenuItem(if (starred) "Unstar" else "Star", if (starred) SmsIconKind.StarFilled else SmsIconKind.Star) {
                         store.toggleStar(mm.key); menuMsg = null
                     })
-                    add(SmsMenuItem(if (pinned) "برداشتن پین" else "پین کردن", if (pinned) SmsIconKind.PinFilled else SmsIconKind.Pin) {
+                    add(SmsMenuItem(if (pinned) "Unpin" else "Pin", if (pinned) SmsIconKind.PinFilled else SmsIconKind.Pin) {
                         store.togglePin(mm.key); menuMsg = null
                     })
-                    add(SmsMenuItem("حذف", SmsIconKind.Trash, danger = true) { store.remove(mm.key); menuMsg = null })
+                    add(SmsMenuItem("Delete", SmsIconKind.Trash, danger = true) { store.remove(mm.key); menuMsg = null })
                 },
-                footer = "حذف فقط از داخل همین برنامه انجام می‌شه."
+                footer = "Deleting only happens inside this app."
             ) {
                 Box(Modifier.width(300.dp)) {
                     SmsBubble(
@@ -1282,12 +1349,12 @@ private fun SmsThreadScreen(
                 p = p,
                 onDismiss = { effectMenu = false },
                 items = listOf(
-                    SmsMenuItem("ارسال معمولی", SmsIconKind.Send) { effectMenu = false; sendNow("") },
-                    SmsMenuItem("آرام", SmsIconKind.Dot) { effectMenu = false; sendNow("gentle") },
-                    SmsMenuItem("بلند", SmsIconKind.Bolt) { effectMenu = false; sendNow("loud") },
-                    SmsMenuItem("کوبیدن", SmsIconKind.Burst) { effectMenu = false; sendNow("slam") }
+                    SmsMenuItem("Send normally", SmsIconKind.Send) { effectMenu = false; sendNow("") },
+                    SmsMenuItem("Gentle", SmsIconKind.Dot) { effectMenu = false; sendNow("gentle") },
+                    SmsMenuItem("Loud", SmsIconKind.Bolt) { effectMenu = false; sendNow("loud") },
+                    SmsMenuItem("Slam", SmsIconKind.Burst) { effectMenu = false; sendNow("slam") }
                 ),
-                footer = "افکت فقط داخل همین برنامه دیده می‌شه. گیرنده یه SMS معمولی می‌گیره."
+                footer = "The effect is only visible inside this app. The recipient gets a normal SMS."
             ) {
                 Box(Modifier.width(300.dp)) {
                     SmsBubble(
