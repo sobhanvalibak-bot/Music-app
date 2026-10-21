@@ -17,6 +17,10 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -1106,7 +1110,7 @@ private fun SmsThreadScreen(
                 }
 
                 // pinned messages banner: tap to jump to the next pinned message
-                AnimatedVisibility(
+                BoxAnimatedVisibility(
                     visible = pinnedMsgs.isNotEmpty(),
                     modifier = Modifier.align(Alignment.TopCenter).padding(top = headerDp + 6.dp),
                     enter = fadeIn() + expandVertically(spring(dampingRatio = 0.8f, stiffness = 380f)),
@@ -1295,4 +1299,18 @@ private fun SmsThreadScreen(
             }
         }
     }
+}
+
+// AnimatedVisibility called from a Box nested inside a Column hits the Compose
+// scope-marker rule (outer ColumnScope receiver is blocked). Wrapping it in a
+// BoxScope extension gives it a single clean receiver.
+@Composable
+private fun BoxScope.BoxAnimatedVisibility(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+    enter: EnterTransition,
+    exit: ExitTransition,
+    content: @Composable AnimatedVisibilityScope.() -> Unit
+) {
+    AnimatedVisibility(visible = visible, modifier = modifier, enter = enter, exit = exit, content = content)
 }
