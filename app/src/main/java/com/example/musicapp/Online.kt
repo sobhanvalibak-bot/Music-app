@@ -165,6 +165,16 @@ private class NpDownloader : Downloader() {
             builder.removeHeader(name)
             values.forEach { builder.addHeader(name, it) }
         }
+        // signed in to YouTube (Settings): send the account cookies with YouTube's own requests
+        val account = YoutubeAuth.cookie
+        if (account != null) {
+            val host = android.net.Uri.parse(url).host.orEmpty()
+            if (host == "youtube.com" || host.endsWith(".youtube.com")) {
+                val existing = request.headers().entries
+                    .firstOrNull { it.key.equals("Cookie", true) }?.value?.joinToString("; ")
+                builder.header("Cookie", listOfNotNull(existing, account).joinToString("; "))
+            }
+        }
         client.newCall(builder.build()).execute().use { resp ->
             if (resp.code == 429) throw ReCaptchaException("reCaptcha Challenge requested", url)
             val text = resp.body?.string()
@@ -265,8 +275,8 @@ object OnlineEngine {
         throw IOException("Could not read this Spotify link")
     }
 
-    /** One downloadable audio file: its address, file extension and mime type. */
-    class AudioSource(val url: String, val ext: String, val mime: String)
+    /** One downloadable audio file: its address, file extension and mime type ([hls] = a playlist of pieces). */
+    class AudioSource(val url: String, val ext: String, val mime: String, val hls: Boolean = false)
 
     private val probeClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -274,11 +284,20 @@ object OnlineEngine {
         .followRedirects(true)
         .build()
 
+    /** Forget every saved address (after signing in or out). */
+    fun clearCache() = urlCache.clear()
+
     /** Forget the saved address of a page (after a playback error), so the next try asks again. */
     fun forget(pageUrl: String) {
         urlCache.remove("$pageUrl|true")
         urlCache.remove("$pageUrl|false")
     }
+
+    /** True when the message means "the site blocked this phone / network" (YouTube's bot check). */
+    fun isBlocked(message: String?): Boolean =
+        message != null && (message.contains("not a bot", true) || message.contains("Sign in to confirm", true))
+
+    fun isSoundCloud(url: String): Boolean = url.contains("soundcloud.com")
 
     /**
      * Asks the server for the first two bytes. Returns null when the address works, else the problem.
@@ -302,7 +321,7 @@ object OnlineEngine {
         val m = e.message.orEmpty()
         return when {
             m.contains("Sign in", true) || m.contains("not a bot", true) ->
-                "YouTube asked to confirm you are not a bot. Try again in a few minutes or use another source."
+                "YouTube asked to confirm you are not a bot (it blocks this network)."
             m.contains("age", true) && m.contains("restrict", true) -> "This video is age restricted"
             m.contains("not available", true) || m.contains("unavailable", true) -> "This video is not available"
             m.contains("Unable to resolve host", true) || m.contains("timeout", true) -> "No internet connection"
@@ -311,18 +330,23 @@ object OnlineEngine {
         }
     }
 
-    /** Progressive audio streams of a page, best first (m4a before the rest, then by bitrate). */
-    private fun audioCandidates(info: StreamInfo): List<org.schabi.newpipe.extractor.stream.AudioStream> {
-        val audio = info.audioStreams.filter {
-            it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP && !it.content.isNullOrBlank()
-        }
+    private fun audioCandidates(
+        info: StreamInfo,
+        method: DeliveryMethod,
+        mp3First: Boolean = false
+    ): List<org.schabi.newpipe.extractor.stream.AudioStream> {
+        val audio = info.audioStreams.filter { it.deliveryMethod == method && !it.content.isNullOrBlank() }
         return audio.sortedWith(
-            compareByDescending<org.schabi.newpipe.extractor.stream.AudioStream> { it.format == MediaFormat.M4A }
-                .thenByDescending { it.averageBitrate }
+            compareByDescending<org.schabi.newpipe.extractor.stream.AudioStream> {
+                if (mp3First) it.format == MediaFormat.MP3 else it.format == MediaFormat.M4A
+            }.thenByDescending { it.averageBitrate }
         )
     }
 
-    /** Blocking: a playable address for the video (audio only, or picture + sound with [video]). */
+    /**
+     * Blocking: a playable address for the song (audio only, or picture + sound with [video]).
+     * SoundCloud gives a playlist (HLS), the other sites a plain file.
+     */
     @Throws(IOException::class)
     fun streamUrl(pageUrl: String, video: Boolean): String {
         val key = "$pageUrl|$video"
@@ -345,15 +369,20 @@ object OnlineEngine {
                 return false
             }
 
-            if (video && pageUrl.contains("youtube.com")) {
-                // a stream that already has sound in it (usually 360p; sometimes 720p)
-                val withSound = info.videoStreams
-                    .filter { !it.isVideoOnly && it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
-                    .sortedByDescending { it.height }
-                for (v in withSound) if (accept(v.content)) break
-            }
-            if (found == null) {
-                for (a in audioCandidates(info).take(4)) if (accept(a.content)) break
+            if (isSoundCloud(pageUrl)) {
+                // the player is told "HLS" for SoundCloud items (see Song.toMediaItem), so only playlists fit here
+                for (a in audioCandidates(info, DeliveryMethod.HLS).take(4)) if (accept(a.content)) break
+            } else {
+                if (video && pageUrl.contains("youtube.com")) {
+                    // a stream that already has sound in it (usually 360p; sometimes 720p)
+                    val withSound = info.videoStreams
+                        .filter { !it.isVideoOnly && it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
+                        .sortedByDescending { it.height }
+                    for (v in withSound) if (accept(v.content)) break
+                }
+                if (found == null) {
+                    for (a in audioCandidates(info, DeliveryMethod.PROGRESSIVE_HTTP).take(4)) if (accept(a.content)) break
+                }
             }
             val url = found
             if (url.isNullOrBlank()) {
@@ -378,7 +407,9 @@ object OnlineEngine {
             ensureInit()
             val info = StreamInfo.getInfo(pageUrl)
             val tried = mutableListOf<String>()
-            for (a in audioCandidates(info).take(4)) {
+            val list = audioCandidates(info, DeliveryMethod.PROGRESSIVE_HTTP).map { it to false } +
+                audioCandidates(info, DeliveryMethod.HLS, mp3First = true).map { it to true }
+            for ((a, hls) in list.take(6)) {
                 val url = a.content ?: continue
                 val problem = probe(url)
                 if (problem != null) { tried += problem; continue }
@@ -388,7 +419,7 @@ object OnlineEngine {
                 if (fmt == null || fmt == MediaFormat.M4A) { ext = "m4a"; mime = "audio/mp4" }
                 else if (fmt == MediaFormat.MP3) { ext = "mp3"; mime = "audio/mpeg" }
                 else { ext = fmt.suffix; mime = fmt.mimeType }
-                return AudioSource(url, ext, mime)
+                return AudioSource(url, ext, mime, hls)
             }
             throw IOException(
                 if (tried.isEmpty()) "No downloadable audio found for this song"
@@ -399,6 +430,35 @@ object OnlineEngine {
         } catch (e: Exception) {
             throw IOException(friendly(e), e)
         }
+    }
+
+    /**
+     * When YouTube blocks a song, look for the same song on SoundCloud (then Bandcamp):
+     * same title and a length within 10 seconds. Blocking: call from a background thread.
+     */
+    fun findAlternative(title: String, artist: String, durationMs: Long): OnlineTrack? {
+        fun norm(s: String) = s.lowercase()
+            .replace(Regex("""\(.*?\)|\[.*?\]"""), " ")
+            .replace(Regex("""[^\p{L}\p{N}]+"""), " ")
+            .trim()
+        val t = norm(title)
+        if (t.isEmpty()) return null
+        for (source in intArrayOf(2, 3)) {
+            val list = try {
+                search("$artist $title".trim(), source)
+            } catch (_: Exception) {
+                emptyList()
+            }
+            val hit = list.firstOrNull { r ->
+                val rt = norm(r.title)
+                val titleOk = rt.contains(t) || (rt.isNotEmpty() && t.contains(rt))
+                val durOk = durationMs <= 0L || r.durationMs <= 0L ||
+                    kotlin.math.abs(r.durationMs - durationMs) <= 10_000L
+                titleOk && durOk
+            }
+            if (hit != null) return hit
+        }
+        return null
     }
 }
 

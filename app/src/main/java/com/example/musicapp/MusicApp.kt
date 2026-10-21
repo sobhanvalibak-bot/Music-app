@@ -274,6 +274,7 @@ fun MusicApp(
     }
 
     val songs = remember(songsVersion, OnlineDownloader.version) { loadSongs(context) }
+    remember { YoutubeAuth.init(context) }
     remember { OnlineRegistry.init(context) } // online songs saved earlier (favorites, playlists, recent)
     // songs on the device plus the online songs the app has seen
     val byId: Map<Long, Song> = remember(songs) { SongIndex(songs.associateBy { it.id }) }
@@ -354,24 +355,48 @@ fun MusicApp(
                     hasVideo = tracks.isTypeSelected(C.TRACK_TYPE_VIDEO)
                 }
                 override fun onPlayerError(error: PlaybackException) {
-                    // an online song that cannot be loaded: try once more with a fresh stream address,
-                    // then say what went wrong. It never jumps to a song from the phone by itself.
+                    // an online song that cannot be loaded: try once more with a fresh stream address;
+                    // if YouTube blocks it, look for the same song on SoundCloud; else say what went wrong.
+                    // It never jumps to a song from the phone by itself.
                     val song = current
-                    if (song?.isOnline == true) {
-                        val page = song.remoteId.orEmpty()
-                        if (onlineRetryId != song.id) {
-                            onlineRetryId = song.id
-                            Thread { OnlineEngine.forget(page) }.start()
-                            c.prepare()
-                            c.play()
-                        } else {
-                            onlineRetryId = null
-                            val reason = generateSequence<Throwable>(error) { it.cause }
-                                .map { it.message.orEmpty() }
-                                .firstOrNull { it.isNotBlank() && !it.startsWith("Source error") && !it.startsWith("androidx.media3") }
-                                ?: "Could not play this online song"
-                            Toast.makeText(context, reason.take(140), Toast.LENGTH_LONG).show()
-                        }
+                    if (song == null || !song.isOnline) return
+                    val page = song.remoteId.orEmpty()
+                    val reason = generateSequence<Throwable>(error) { it.cause }
+                        .map { it.message.orEmpty() }
+                        .firstOrNull { it.isNotBlank() && !it.startsWith("Source error") && !it.startsWith("androidx.media3") }
+                        ?: "Could not play this online song"
+                    val blocked = OnlineEngine.isBlocked(reason)
+                    if (!blocked && onlineRetryId != song.id) {
+                        onlineRetryId = song.id
+                        Thread { OnlineEngine.forget(page) }.start()
+                        c.prepare()
+                        c.play()
+                        return
+                    }
+                    onlineRetryId = null
+                    val hint = if (blocked && !YoutubeAuth.signedIn) "\nTip: Settings > YouTube account > Sign in" else ""
+                    if (song.canWatch) {
+                        Toast.makeText(context, "Looking for this song on SoundCloud...", Toast.LENGTH_SHORT).show()
+                        val ui = android.os.Handler(android.os.Looper.getMainLooper())
+                        Thread {
+                            val alt = OnlineEngine.findAlternative(song.title, song.artist, song.durationMs)
+                            ui.post {
+                                if (alt != null && c.currentMediaItem?.mediaId == song.id.toString()) {
+                                    val altSong = alt.toSong()
+                                    OnlineRegistry.remember(altSong)
+                                    val idx = c.currentMediaItemIndex
+                                    c.replaceMediaItem(idx, altSong.toMediaItem())
+                                    c.seekTo(idx, 0L)
+                                    c.prepare()
+                                    c.play()
+                                    Toast.makeText(context, "Playing from ${altSong.sourceName}", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, reason.take(140) + hint, Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }.start()
+                    } else {
+                        Toast.makeText(context, reason.take(140) + hint, Toast.LENGTH_LONG).show()
                     }
                 }
                 override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing; if (playing) onlineRetryId = null }

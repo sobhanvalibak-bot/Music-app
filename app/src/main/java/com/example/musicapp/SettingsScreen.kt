@@ -186,6 +186,36 @@ fun SettingsTab(
         }
 
         item {
+            var showLogin by remember { mutableStateOf(false) }
+            SettingsCard("YouTube account", p) {
+                Text(
+                    "YouTube sometimes says \"confirm you're not a bot\" and refuses to play. Signing in once with your own " +
+                        "account usually fixes it. You type your password on Google's own page; only the sign-in cookies " +
+                        "are kept, on this phone.",
+                    fontSize = 13.sp, color = p.secondary
+                )
+                Spacer(Modifier.height(12.dp))
+                if (YoutubeAuth.signedIn) {
+                    Text("Signed in", color = p.text, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = { YoutubeAuth.signOut(context) }, modifier = Modifier.fillMaxWidth()) { Text("Sign out") }
+                } else {
+                    Button(
+                        onClick = { showLogin = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = p.accent)
+                    ) { Text("Sign in to YouTube", color = Color.White) }
+                }
+            }
+            if (showLogin) {
+                YoutubeAuth.LoginDialog(p) { ok ->
+                    showLogin = false
+                    if (ok) android.widget.Toast.makeText(context, "Signed in to YouTube", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        item {
             SettingsCard("Appearance", p) {
                 Segmented(ThemeLabels, settings.theme, p) { settings.changeTheme(it) }
                 if (settings.theme == 3) {

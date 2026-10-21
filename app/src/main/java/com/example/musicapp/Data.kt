@@ -67,6 +67,8 @@ fun Song.toMediaItem(video: Boolean = false): MediaItem {
     return MediaItem.Builder()
         .setMediaId(id.toString())
         .setUri(playUri)
+        // SoundCloud streams are playlists (HLS); the address is only known later, so the type is set here
+        .apply { if (remote != null && OnlineEngine.isSoundCloud(remote)) setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8) }
         .setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(title)

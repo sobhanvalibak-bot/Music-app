@@ -67,13 +67,23 @@ object OnlineDownloader {
         Thread {
             var cache: File? = null
             try {
-                val source = OnlineEngine.audioSource(page)
+                val source = try {
+                    OnlineEngine.audioSource(page)
+                } catch (e: IOException) {
+                    // YouTube blocked this network: take the same song from SoundCloud / Bandcamp if it is there
+                    if (!OnlineEngine.isBlocked(e.message)) throw e
+                    val alt = OnlineEngine.findAlternative(song.title, song.artist, song.durationMs) ?: throw e
+                    toast(app, "YouTube blocked it, downloading from ${sourceNameOf(alt.url)}")
+                    OnlineEngine.audioSource(alt.url)
+                }
                 val file = File(app.cacheDir, "dl_${System.nanoTime()}.${source.ext}")
                 cache = file
 
-                download(source.url, file) { f ->
+                val report = { f: Float ->
                     main.post { if (isBusy(song.id)) progress[song.id] = f.coerceIn(0f, 0.99f) }
+                    Unit
                 }
+                if (source.hls) downloadHls(source.url, file, report) else download(source.url, file, report)
                 writeTags(app, song, file)
                 save(app, song, file, source.ext, source.mime)
 
@@ -137,6 +147,50 @@ object OnlineDownloader {
                 }
                 if (total in 0..offset) break
                 if (offset == 0L) throw IOException("Empty answer from the server")
+            }
+        }
+        if (target.length() < 1024L) throw IOException("The downloaded file is empty")
+    }
+
+    /** A playlist of pieces (SoundCloud): download every piece and put them one after the other in one file. */
+    @Throws(IOException::class)
+    private fun downloadHls(playlistUrl: String, target: File, onProgress: (Float) -> Unit) {
+        fun text(url: String): String {
+            val req = Request.Builder().url(url).header("User-Agent", OnlineEngine.USER_AGENT).build()
+            client.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) throw IOException("The server answered HTTP ${r.code}")
+                return r.body?.string() ?: throw IOException("Empty playlist")
+            }
+        }
+
+        var url = playlistUrl
+        var body = text(url)
+        if (body.contains("#EXT-X-STREAM-INF")) {
+            // a list of qualities: take the first one
+            val variant = body.lines().firstOrNull { it.isNotBlank() && !it.startsWith("#") }
+                ?: throw IOException("Empty playlist")
+            url = java.net.URI(url).resolve(variant.trim()).toString()
+            body = text(url)
+        }
+        if (Regex("#EXT-X-KEY:.*METHOD=(?!NONE)").containsMatchIn(body)) {
+            throw IOException("This stream is encrypted and cannot be saved")
+        }
+        val pieces = mutableListOf<String>()
+        Regex("#EXT-X-MAP:.*URI=\"([^\"]+)\"").find(body)?.let {
+            pieces += java.net.URI(url).resolve(it.groupValues[1]).toString()
+        }
+        body.lines().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }
+            .forEach { pieces += java.net.URI(url).resolve(it).toString() }
+        if (pieces.isEmpty()) throw IOException("Empty playlist")
+
+        target.outputStream().use { out ->
+            pieces.forEachIndexed { i, piece ->
+                val req = Request.Builder().url(piece).header("User-Agent", OnlineEngine.USER_AGENT).build()
+                client.newCall(req).execute().use { r ->
+                    if (!r.isSuccessful) throw IOException("The server answered HTTP ${r.code}")
+                    copy(r.body?.byteStream(), out)
+                }
+                onProgress((i + 1).toFloat() / pieces.size.toFloat())
             }
         }
         if (target.length() < 1024L) throw IOException("The downloaded file is empty")

@@ -115,6 +115,15 @@ class MainActivity : ComponentActivity() {
                             signal = volumeSignal,
                             edge = volumeEdge,
                             level = volumeLevel,
+                            p = p,
+                            onLevel = { f ->
+                                val max = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                                try {
+                                    audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, Math.round(f * max), 0)
+                                } catch (_: Exception) {
+                                }
+                                volumeLevel = musicLevel()
+                            },
                             modifier = Modifier.align(Alignment.CenterStart)
                         )
                     }
