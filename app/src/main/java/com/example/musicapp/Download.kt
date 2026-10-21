@@ -62,6 +62,7 @@ object OnlineDownloader {
             return
         }
         val app = context.applicationContext
+        AppLog.i("download", "start: ${song.title} (${song.sourceName})")
         progress[song.id] = 0f
         toast(app, "Downloading: ${song.title}")
         Thread {
@@ -74,8 +75,10 @@ object OnlineDownloader {
                     if (!OnlineEngine.isBlocked(e.message)) throw e
                     val alt = OnlineEngine.findAlternative(song.title, song.artist, song.durationMs) ?: throw e
                     toast(app, "YouTube blocked it, downloading from ${sourceNameOf(alt.url)}")
+                    AppLog.i("download", "YouTube blocked it, using ${sourceNameOf(alt.url)}: ${alt.title}")
                     OnlineEngine.audioSource(alt.url)
                 }
+                AppLog.i("download", "file source: .${source.ext}, ${if (source.hls) "hls playlist" else "plain file"}")
                 val file = File(app.cacheDir, "dl_${System.nanoTime()}.${source.ext}")
                 cache = file
 
@@ -91,9 +94,11 @@ object OnlineDownloader {
                     progress[song.id] = 1f
                     version++
                 }
+                AppLog.i("download", "saved: ${song.title}")
                 toast(app, "Saved: ${song.title}")
             } catch (e: Exception) {
                 main.post { progress.remove(song.id) }
+                AppLog.e("download", "failed: ${song.title}", e)
                 toast(app, "Download failed: ${e.message ?: "unknown error"}")
             } finally {
                 try {

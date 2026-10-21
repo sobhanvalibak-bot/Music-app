@@ -18,7 +18,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -35,6 +37,7 @@ object YoutubeAuth {
     private const val PREFS = "youtube_auth"
     private const val LOGIN_URL =
         "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fm.youtube.com%2F"
+    private const val HOME_URL = "https://m.youtube.com/"
 
     // a normal Chrome on Android (Google refuses sign-in inside a page that says it is an app's web view)
     const val WEB_UA =
@@ -59,12 +62,15 @@ object YoutubeAuth {
         }
     }
 
+    private fun looksSignedIn(c: String) = c.contains("SAPISID") || c.contains("__Secure-3PSID")
+
     fun save(context: Context, value: String) {
         cookie = value
         signedIn = true
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString("cookie", value).apply()
         OnlineEngine.clearCache()
+        AppLog.i("auth", "YouTube cookies saved (${value.length} chars, signed-in cookie present: ${looksSignedIn(value)})")
     }
 
     fun signOut(context: Context) {
@@ -77,12 +83,19 @@ object YoutubeAuth {
         } catch (_: Exception) {
         }
         OnlineEngine.clearCache()
+        AppLog.i("auth", "Signed out of YouTube")
     }
 
-    /** Full-screen Google sign-in. [onDone] gets true once the sign-in worked. */
+    /**
+     * Full-screen YouTube page. [verify] = false: Google sign-in, closes by itself once you are in.
+     * [verify] = true: the normal YouTube site with your account; if YouTube shows a check there
+     * ("I'm not a robot", a sign-in prompt...) you do it yourself, then tap Done (the fresh cookies are kept).
+     * [onDone] gets true when the cookies were saved.
+     */
     @SuppressLint("SetJavaScriptEnabled")
     @Composable
-    fun LoginDialog(p: Palette, onDone: (Boolean) -> Unit) {
+    fun LoginDialog(p: Palette, verify: Boolean = false, onDone: (Boolean) -> Unit) {
+        val context = LocalContext.current
         Dialog(
             onDismissRequest = { onDone(false) },
             properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -91,12 +104,28 @@ object YoutubeAuth {
                 Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
                     Text(
                         "Cancel", color = p.accent, fontSize = 17.sp,
-                        modifier = Modifier.clickable { onDone(false) }
+                        modifier = Modifier.align(Alignment.CenterStart).clickable { onDone(false) }
                     )
                     Text(
-                        "Sign in to YouTube", color = p.text, fontSize = 17.sp,
-                        modifier = Modifier.align(androidx.compose.ui.Alignment.Center)
+                        if (verify) "Verify with YouTube" else "Sign in to YouTube",
+                        color = p.text, fontSize = 17.sp,
+                        modifier = Modifier.align(Alignment.Center)
                     )
+                    if (verify) {
+                        Text(
+                            "Done", color = p.accent, fontSize = 17.sp,
+                            modifier = Modifier.align(Alignment.CenterEnd).clickable {
+                                val c = CookieManager.getInstance().getCookie("https://www.youtube.com").orEmpty()
+                                if (looksSignedIn(c)) {
+                                    save(context, c)
+                                    onDone(true)
+                                } else {
+                                    AppLog.w("auth", "Verify closed, but there is no signed-in cookie. Sign in first.")
+                                    onDone(false)
+                                }
+                            }
+                        )
+                    }
                 }
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
@@ -110,15 +139,15 @@ object YoutubeAuth {
                             cm.setAcceptThirdPartyCookies(this, true)
                             webViewClient = object : WebViewClient() {
                                 override fun onPageFinished(view: WebView, url: String?) {
-                                    if (url == null || !url.contains("youtube.com")) return
+                                    if (verify || url == null || !url.contains("youtube.com")) return
                                     val c = cm.getCookie("https://www.youtube.com").orEmpty()
-                                    if (c.contains("SAPISID") || c.contains("__Secure-3PSID")) {
+                                    if (looksSignedIn(c)) {
                                         save(ctx, c)
                                         onDone(true)
                                     }
                                 }
                             }
-                            loadUrl(LOGIN_URL)
+                            loadUrl(if (verify) HOME_URL else LOGIN_URL)
                         }
                     },
                     onRelease = { it.destroy() }

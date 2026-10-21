@@ -274,6 +274,7 @@ fun MusicApp(
     }
 
     val songs = remember(songsVersion, OnlineDownloader.version) { loadSongs(context) }
+    remember { AppLog.init(context) }
     remember { YoutubeAuth.init(context) }
     remember { OnlineRegistry.init(context) } // online songs saved earlier (favorites, playlists, recent)
     // songs on the device plus the online songs the app has seen
@@ -358,7 +359,13 @@ fun MusicApp(
                     // an online song that cannot be loaded: try once more with a fresh stream address;
                     // if YouTube blocks it, look for the same song on SoundCloud; else say what went wrong.
                     // It never jumps to a song from the phone by itself.
-                    val song = current
+                    val mid = c.currentMediaItem?.mediaId?.toLongOrNull()
+                    val song = mid?.let { byId[it] } ?: current
+                    AppLog.e(
+                        "player",
+                        "error ${error.errorCodeName} on \"${song?.title ?: mid}\" (${if (song?.isOnline == true) song.sourceName else "device"})",
+                        error
+                    )
                     if (song == null || !song.isOnline) return
                     val page = song.remoteId.orEmpty()
                     val reason = generateSequence<Throwable>(error) { it.cause }
@@ -376,6 +383,7 @@ fun MusicApp(
                     onlineRetryId = null
                     val hint = if (blocked && !YoutubeAuth.signedIn) "\nTip: Settings > YouTube account > Sign in" else ""
                     if (song.canWatch) {
+                        AppLog.i("fallback", "YouTube failed (${reason.take(60)}), looking on SoundCloud")
                         Toast.makeText(context, "Looking for this song on SoundCloud...", Toast.LENGTH_SHORT).show()
                         val ui = android.os.Handler(android.os.Looper.getMainLooper())
                         Thread {
@@ -411,6 +419,17 @@ fun MusicApp(
                 override fun onRepeatModeChanged(mode: Int) { repeatMode = mode }
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     currentWindow = c.currentMediaItemIndex
+                    run {
+                        val id = mediaItem?.mediaId?.toLongOrNull()
+                        val why = when (reason) {
+                            Player.MEDIA_ITEM_TRANSITION_REASON_AUTO -> "auto"
+                            Player.MEDIA_ITEM_TRANSITION_REASON_SEEK -> "seek/skip"
+                            Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT -> "repeat"
+                            else -> "list changed"
+                        }
+                        val t = id?.let { byId[it] }
+                        AppLog.i("play", "now: ${t?.title ?: id} (${if (t?.isOnline == true) t.sourceName else "device"}) · $why")
+                    }
                     // new song: the bar starts again from the real position, not from the old song's
                     position = c.currentPosition
                     current = mediaItem?.mediaId?.toLongOrNull()?.let { id -> byId[id]?.also { profile.recordRecentlyPlayed(id) } }
@@ -439,6 +458,7 @@ fun MusicApp(
     fun playOne(song: Song, video: Boolean = false) {
         val c = controller ?: return
         OnlineRegistry.remember(song)
+        AppLog.i("play", "request: ${song.title} (${if (song.isOnline) song.sourceName else "device"})${if (video) " with video" else ""}")
         val item = song.toMediaItem(video)
         if (c.mediaItemCount == 0) {
             c.setMediaItem(item)

@@ -178,6 +178,7 @@ private class NpDownloader : Downloader() {
         client.newCall(builder.build()).execute().use { resp ->
             if (resp.code == 429) throw ReCaptchaException("reCaptcha Challenge requested", url)
             val text = resp.body?.string()
+            if (resp.code >= 400) AppLog.w("net", "HTTP ${resp.code} ${android.net.Uri.parse(url).host}${android.net.Uri.parse(url).path.orEmpty().take(40)}")
             return NpResponse(resp.code, resp.message, resp.headers.toMultimap(), text, resp.request.url.toString())
         }
     }
@@ -284,6 +285,15 @@ object OnlineEngine {
         .followRedirects(true)
         .build()
 
+    private fun hostOf(url: String): String = try { Uri.parse(url).host.orEmpty() } catch (_: Exception) { "?" }
+
+    private fun describeStreams(info: StreamInfo): String {
+        val a = info.audioStreams
+        val prog = a.count { it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
+        val hls = a.count { it.deliveryMethod == DeliveryMethod.HLS }
+        return "audio ${a.size} (file $prog, hls $hls, other ${a.size - prog - hls}), video ${info.videoStreams.size}"
+    }
+
     /** Forget every saved address (after signing in or out). */
     fun clearCache() = urlCache.clear()
 
@@ -354,7 +364,9 @@ object OnlineEngine {
         urlCache[key]?.let { if (it.second > now) return it.first }
         try {
             ensureInit()
+            AppLog.i("resolve", "${sourceNameOf(pageUrl)} video=$video signedIn=${YoutubeAuth.signedIn}\n$pageUrl")
             val info = StreamInfo.getInfo(pageUrl)
+            AppLog.i("resolve", describeStreams(info))
             val tried = mutableListOf<String>()
             var found: String? = null
 
@@ -363,9 +375,11 @@ object OnlineEngine {
                 val problem = probe(url)
                 if (problem == null) {
                     found = url
+                    AppLog.i("resolve", "stream ok (${hostOf(url)})")
                     return true
                 }
                 tried += problem
+                AppLog.w("resolve", "stream refused: $problem (${hostOf(url)})")
                 return false
             }
 
@@ -394,8 +408,10 @@ object OnlineEngine {
             urlCache[key] = url to (now + URL_TTL_MS)
             return url
         } catch (e: IOException) {
+            AppLog.e("resolve", "failed: ${e.message}", e.cause)
             throw e
         } catch (e: Exception) {
+            AppLog.e("resolve", "failed (${e.javaClass.simpleName})", e)
             throw IOException(friendly(e), e)
         }
     }
@@ -405,7 +421,9 @@ object OnlineEngine {
     fun audioSource(pageUrl: String): AudioSource {
         try {
             ensureInit()
+            AppLog.i("download", "looking for a file: ${sourceNameOf(pageUrl)} signedIn=${YoutubeAuth.signedIn}\n$pageUrl")
             val info = StreamInfo.getInfo(pageUrl)
+            AppLog.i("download", describeStreams(info))
             val tried = mutableListOf<String>()
             val list = audioCandidates(info, DeliveryMethod.PROGRESSIVE_HTTP).map { it to false } +
                 audioCandidates(info, DeliveryMethod.HLS, mp3First = true).map { it to true }
@@ -426,8 +444,10 @@ object OnlineEngine {
                 else "The server refused the file (${tried.last()})"
             )
         } catch (e: IOException) {
+            AppLog.e("resolve", "failed: ${e.message}", e.cause)
             throw e
         } catch (e: Exception) {
+            AppLog.e("resolve", "failed (${e.javaClass.simpleName})", e)
             throw IOException(friendly(e), e)
         }
     }
@@ -456,6 +476,7 @@ object OnlineEngine {
                     kotlin.math.abs(r.durationMs - durationMs) <= 10_000L
                 titleOk && durOk
             }
+            AppLog.i("fallback", "${OnlineSources[source]}: ${list.size} results for \"$artist $title\" -> ${hit?.title ?: "no match"}")
             if (hit != null) return hit
         }
         return null

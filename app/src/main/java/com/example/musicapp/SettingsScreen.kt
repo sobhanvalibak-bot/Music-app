@@ -187,6 +187,7 @@ fun SettingsTab(
 
         item {
             var showLogin by remember { mutableStateOf(false) }
+            var showVerify by remember { mutableStateOf(false) }
             SettingsCard("YouTube account", p) {
                 Text(
                     "YouTube sometimes says \"confirm you're not a bot\" and refuses to play. Signing in once with your own " +
@@ -198,6 +199,18 @@ fun SettingsTab(
                 if (YoutubeAuth.signedIn) {
                     Text("Signed in", color = p.text, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(8.dp))
+                    Text(
+                        "If YouTube still refuses, open it here and do any check it shows (for example \"I'm not a robot\" " +
+                            "or a sign-in prompt) yourself, then tap Done.",
+                        fontSize = 13.sp, color = p.secondary
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = { showVerify = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = p.accent)
+                    ) { Text("Open YouTube to verify", color = Color.White) }
+                    Spacer(Modifier.height(8.dp))
                     OutlinedButton(onClick = { YoutubeAuth.signOut(context) }, modifier = Modifier.fillMaxWidth()) { Text("Sign out") }
                 } else {
                     Button(
@@ -207,10 +220,51 @@ fun SettingsTab(
                     ) { Text("Sign in to YouTube", color = Color.White) }
                 }
             }
+            if (showVerify) {
+                YoutubeAuth.LoginDialog(p, verify = true) { ok ->
+                    showVerify = false
+                    if (ok) android.widget.Toast.makeText(context, "YouTube cookies refreshed", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
             if (showLogin) {
                 YoutubeAuth.LoginDialog(p) { ok ->
                     showLogin = false
                     if (ok) android.widget.Toast.makeText(context, "Signed in to YouTube", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        item {
+            SettingsCard("Logs (last 10)", p) {
+                val shown = AppLog.entries.takeLast(10).reversed()
+                if (shown.isEmpty()) {
+                    Text("Nothing logged yet. Play or search an online song, then look here.", fontSize = 13.sp, color = p.secondary)
+                } else {
+                    shown.forEachIndexed { i, e ->
+                        if (i > 0) Spacer(Modifier.height(10.dp))
+                        val tone = when (e.level) {
+                            'E' -> Color(0xFFFF3B30)
+                            'W' -> Color(0xFFFF9500)
+                            else -> p.secondary
+                        }
+                        Text(
+                            "${AppLog.timeOf(e)}  ${e.level}  ${e.tag}",
+                            fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = tone
+                        )
+                        Text(e.text, fontSize = 12.sp, color = p.text)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("MusicApp log", AppLog.asText(10)))
+                            android.widget.Toast.makeText(context, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Copy") }
+                    OutlinedButton(onClick = { AppLog.clear() }, modifier = Modifier.weight(1f)) { Text("Clear") }
                 }
             }
         }

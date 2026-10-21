@@ -74,6 +74,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        AppLog.init(this)
         YoutubeAuth.init(this)
         val p = ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)

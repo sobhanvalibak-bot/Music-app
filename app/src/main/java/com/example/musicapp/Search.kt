@@ -163,6 +163,7 @@ fun SearchScreen(
             throw e
         } catch (e: Exception) {
             onlineResults = emptyList()
+            AppLog.e("search", "online search failed (${OnlineSources[source]}): $q", e)
             onlineError = if (spotifyId != null) "Could not read this Spotify link. Check your internet connection."
             else "Online search failed. Check your internet connection."
         }
