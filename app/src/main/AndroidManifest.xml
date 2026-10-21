@@ -19,17 +19,6 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- needed to read the name and icon of the app that sent a notification (Android 11+) -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
-    <!-- Misc page: read and send text messages, show contact names instead of numbers -->
-    <uses-permission android:name="android.permission.READ_SMS" />
-    <uses-permission android:name="android.permission.SEND_SMS" />
-    <uses-permission android:name="android.permission.READ_CONTACTS" />
-    <!-- Misc page, Calls tab: recents, placing calls from the keypad and contacts -->
-    <uses-permission android:name="android.permission.READ_CALL_LOG" />
-    <uses-permission android:name="android.permission.CALL_PHONE" />
-    <!-- In-app call screen: ringing, and showing the call over the lock screen -->
-    <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
-    <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <application
         android:icon="@mipmap/ic_launcher"
@@ -44,41 +33,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- what Android checks before this app can be chosen as the phone app: "Dial" and tel: links -->
-            <intent-filter>
-                <action android:name="android.intent.action.DIAL" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.DIAL" />
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="tel" />
-            </intent-filter>
         </activity>
-
-        <!-- The call screen -->
-        <activity
-            android:name=".InCallActivity"
-            android:exported="false"
-            android:launchMode="singleTask"
-            android:taskAffinity="com.example.musicapp.incall"
-            android:showWhenLocked="true"
-            android:turnScreenOn="true"
-            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
-
-        <!-- Android sends every call here when this app is the phone app -->
-        <service
-            android:name=".MusicInCallService"
-            android:exported="true"
-            android:permission="android.permission.BIND_INCALL_SERVICE">
-            <meta-data android:name="android.telecom.IN_CALL_SERVICE_UI" android:value="true" />
-            <meta-data android:name="android.telecom.IN_CALL_SERVICE_RINGING" android:value="true" />
-            <intent-filter>
-                <action android:name="android.telecom.InCallService" />
-            </intent-filter>
-        </service>
 
         <service
             android:name=".PlaybackService"
