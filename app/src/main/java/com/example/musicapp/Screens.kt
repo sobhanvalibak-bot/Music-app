@@ -284,6 +284,7 @@ fun SongRow(
 fun SongsTab(
     songs: List<Song>,
     recentlyPlayed: List<Song> = emptyList(),
+    songOfDay: SongPick? = null,
     current: Song?,
     favSet: Set<Long>,
     p: Palette,
@@ -386,6 +387,17 @@ fun SongsTab(
                         }
                     }
                 }
+                songOfDay?.let { pick ->
+                    Spacer(Modifier.height(14.dp))
+                    SongOfDayCard(
+                        pick = pick,
+                        isFav = favSet.contains(pick.song.id),
+                        p = p,
+                        onPlay = { onPlay(songs.indexOfFirst { it.id == pick.song.id }.coerceAtLeast(0)) },
+                        onFav = { onToggleFav(pick.song) },
+                        modifier = Modifier.staggerIn(2)
+                    )
+                }
                 if (songs.isNotEmpty()) {
                     Spacer(Modifier.height(20.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -472,8 +484,8 @@ fun SongsTab(
                 Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                SmsIcon(
-                    SmsIconKind.ChevronUp, if (armed) p.accent else p.secondary,
+                ChevronUpIcon(
+                    if (armed) p.accent else p.secondary,
                     Modifier.size(20.dp).graphicsLayer { translationY = -pullUp.pull.value * 0.12f }
                 )
                 Text(
@@ -824,7 +836,9 @@ fun ProfileTab(
     onPlayList: (List<Song>) -> Unit,
     onPlayNextList: (List<Song>) -> Unit,
     onShuffleList: (List<Song>) -> Unit,
-    onSongPlayNext: (Song) -> Unit
+    onSongPlayNext: (Song) -> Unit,
+    listenLog: ListenLog,
+    onRecap: () -> Unit
 ) {
     val context = LocalContext.current
     val favSongs = profile.favorites.reversed().mapNotNull { byId[it] }
@@ -941,6 +955,16 @@ fun ProfileTab(
                     }
                 }
             }
+        }
+
+        item {
+            val monthStats = remember(listenLog.version, byId) { listenLog.month(byId) }
+            ListeningCard(
+                stats = monthStats,
+                p = p,
+                onOpen = onRecap,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp).staggerIn(3)
+            )
         }
 
         item { SectionHeader("Favorites", "See all", p, onFavorites) }

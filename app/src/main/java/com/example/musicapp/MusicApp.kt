@@ -83,6 +83,7 @@ fun MusicApp(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val profile = remember { ProfileStore(context) }
+    val listenLog = remember { ListenLog(context) }
     // Player surfaces follow the current cover independently from the app-wide theme.
     var playerTint by remember { mutableStateOf<Color?>(null) }
     val animatedPlayerTint by animateColorAsState(
@@ -234,22 +235,8 @@ fun MusicApp(
     var barsVisible by remember { mutableStateOf(true) }
     var searching by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
-    // the Misc page (SMS) and whether one of its chats is open (then it covers the tab bar)
-    var misc by remember { mutableStateOf(false) }
-    var miscTab by remember { mutableIntStateOf(0) }   // 0 = SMS, 1 = Calls
-    var miscThread by remember { mutableStateOf(false) }
-
-    LaunchedEffect(DialRequest.number) {
-        if (DialRequest.number != null) {
-            misc = true
-            miscTab = 1
-            searching = false
-            barsVisible = true
-        }
-    }
 
     BackHandler(enabled = searching) { searching = false }
-    BackHandler(enabled = misc && !miscThread && !searching) { misc = false }
     BackHandler(enabled = tab == 3 && sub != Sub.None) { sub = Sub.None }
     BackHandler(enabled = artistPage != null) { artistPage = null }
     BackHandler(enabled = showPlayer) { showPlayer = false }
@@ -341,6 +328,7 @@ fun MusicApp(
         map.values.map { ArtistGroup(it.first, it.second) }.sortedBy { it.name.lowercase() }
     }
     val favSet = profile.favorites.toSet()
+    val songOfDay = remember(songs) { listenLog.songOfDay(songs, favSet) }
 
     // Playback runs in PlaybackService (media session + notification + lock screen).
     var controller by remember { mutableStateOf<MediaController?>(null) }
@@ -461,6 +449,7 @@ fun MusicApp(
                     }
                     // new song: the bar starts again from the real position, not from the old song's
                     position = c.currentPosition
+                    listenLog.newTrack()
                     current = mediaItem?.mediaId?.toLongOrNull()?.let { id -> byId[id]?.also { profile.recordRecentlyPlayed(id) } }
                 }
             }
@@ -470,6 +459,16 @@ fun MusicApp(
     }
 
     LaunchedEffect(controller) { controller?.setPlaybackSpeed(settings.speed) }
+
+    // listening log: one tick per second of playback (feeds "Your listening this month" and "Song of the day")
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000)
+            val playing = current
+            if (isPlaying && playing != null) listenLog.tick(playing.id)
+        }
+    }
+    LaunchedEffect(isPlaying) { if (!isPlaying) listenLog.flush() }
 
     fun playQueue(queue: List<Song>, index: Int) {
         val c = controller ?: return
@@ -723,8 +722,20 @@ fun MusicApp(
                         onPlayList = { playQueue(it, 0) },
                         onPlayNextList = { queueNextAll(it) },
                         onShuffleList = { playQueue(it.shuffled(), 0) },
-                        onSongPlayNext = { queueNext(it) }
+                        onSongPlayNext = { queueNext(it) },
+                        listenLog = listenLog,
+                        onRecap = { sub = Sub.Recap }
                     )
+                    is Sub.Recap -> Box(Modifier.fillMaxSize().swipeBack { sub = Sub.None }.background(p.bgBrush)) {
+                        RecapPage(
+                            stats = remember(listenLog.version, byId) { listenLog.month(byId) },
+                            p = p,
+                            topPad = topPad,
+                            bottomPad = bottomPad,
+                            onBack = { sub = Sub.None },
+                            onPlay = { playOne(it) }
+                        )
+                    }
                     is Sub.Settings -> Box(Modifier.fillMaxSize().swipeBack { sub = Sub.None }.background(p.bgBrush)) { SettingsTab(
                         settings = settings,
                         p = p,
@@ -802,6 +813,7 @@ fun MusicApp(
             } else when (t) {
                 0 -> SongsTab(
                     songs = sorted,
+                    songOfDay = songOfDay,
                     recentlyPlayed = profile.recentlyPlayed.mapNotNull { byId[it] },
                     current = current,
                     favSet = favSet,
@@ -895,22 +907,6 @@ fun MusicApp(
             }
         }
 
-        // Misc page: SMS inbox and chats. A chat covers everything, the inbox sits under the bars.
-        if (misc) {
-            Box(Modifier.fillMaxSize().zIndex(if (miscThread) 1f else 0f)) {
-                if (miscTab == 0) {
-                    SmsMiscScreen(
-                        p = p,
-                        topPad = topPad,
-                        bottomPad = bottomPad,
-                        onThreadOpen = { miscThread = it }
-                    )
-                } else {
-                    CallsScreen(p = p, topPad = topPad, bottomPad = bottomPad)
-                }
-            }
-        }
-
         // Search page: rises from the bottom like an iOS sheet
         AnimatedVisibility(
             visible = searching,
@@ -978,56 +974,20 @@ fun MusicApp(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (misc) {
-                    // Misc mode: the four music tabs turn into SMS and Calls, and the round button goes back to Songs
-                    GlassTabBar(
-                        modifier = Modifier.weight(1f),
-                        selected = if (searching) -1 else miscTab,
-                        onSelect = {
-                            miscTab = it
-                            miscThread = false
-                            barsVisible = true
-                        },
-                        p = p,
-                        photo = profile.photo,
-                        profileName = profile.name,
-                        customTabs = MiscTabs
-                    )
-                    MiscButton(
-                        active = false,
-                        p = p,
-                        songs = true,
-                        onClick = {
-                            barsVisible = true
-                            searching = false
-                            misc = false
-                        }
-                    )
-                } else {
-                    GlassTabBar(
-                        modifier = Modifier.weight(1f),
-                        selected = if (searching) -1 else tab,
-                        onSelect = {
-                            searching = false
-                            sub = Sub.None
-                            artistPage = null
-                            barsVisible = true
-                            tab = it
-                        },
-                        p = p,
-                        photo = profile.photo,
-                        profileName = profile.name
-                    )
-                    MiscButton(
-                        active = false,
-                        p = p,
-                        onClick = {
-                            barsVisible = true
-                            searching = false
-                            misc = true
-                        }
-                    )
-                }
+                GlassTabBar(
+                    modifier = Modifier.weight(1f),
+                    selected = if (searching) -1 else tab,
+                    onSelect = {
+                        searching = false
+                        sub = Sub.None
+                        artistPage = null
+                        barsVisible = true
+                        tab = it
+                    },
+                    p = p,
+                    photo = profile.photo,
+                    profileName = profile.name
+                )
             }
         }
 

@@ -190,6 +190,22 @@ fun FullPlayer(
         label = "coverFly"
     )
 
+    // Swipe the cover: left = next song, right = previous song (neighbours come from the queue)
+    val deck = remember { SwipeDeckState() }
+    val qPos = queue.indexOfFirst { it.index == currentWindow }
+    val prevEntry = if (qPos > 0) queue[qPos - 1] else null
+    val nextEntry = if (qPos >= 0 && qPos < queue.size - 1) queue[qPos + 1] else null
+    LaunchedEffect(song.id) {
+        deck.settling = null
+        deck.dragX = 0f
+    }
+    LaunchedEffect(deck.settling) {
+        if (deck.settling != null) {
+            delay(1500)
+            deck.settling = null
+        }
+    }
+
     Box(
         Modifier
             .fillMaxSize()
@@ -237,9 +253,21 @@ fun FullPlayer(
 
             // ── Cover: wide, rounded, fits whatever space is left ──
             Box(
-                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 22.dp, vertical = 14.dp),
+                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 22.dp, vertical = 14.dp)
+                    .swipeDeck(
+                        state = deck,
+                        enabled = !hasVideo && !showAlbumNow,
+                        hasPrev = prevEntry != null,
+                        hasNext = nextEntry != null,
+                        onPrev = { prevEntry?.let { deck.settling = it.song; onPlayQueueItem(it.index) } },
+                        onNext = { nextEntry?.let { deck.settling = it.song; onPlayQueueItem(it.index) } }
+                    ),
                 contentAlignment = Alignment.Center
             ) {
+              if (!hasVideo && deck.settling == null) {
+                  prevEntry?.let { DeckNeighbor(it.song, -1, deck, p, coverFly) }
+                  nextEntry?.let { DeckNeighbor(it.song, 1, deck, p, coverFly) }
+              }
               if (hasVideo && videoPlayer != null) {
                 VideoSurface(
                     videoPlayer,
@@ -251,21 +279,22 @@ fun FullPlayer(
                 )
               } else {
                 Cover(
-                    song,
+                    deck.settling ?: song,
                     Modifier
                         .aspectRatio(1f)
                         .graphicsLayer {
                             val fly = (0.28f + 0.72f * coverFly)
-                            scaleX = coverScale * fly
-                            scaleY = coverScale * fly
+                            val swipe = (kotlin.math.abs(deck.dragX) / deck.step).coerceIn(0f, 1f)
+                            scaleX = coverScale * fly * (1f - 0.12f * swipe)
+                            scaleY = coverScale * fly * (1f - 0.12f * swipe)
                             translationY = (1f - coverFly) * size.height * 1.5f
-                            translationX = -(1f - coverFly) * size.width * 0.35f
+                            translationX = -(1f - coverFly) * size.width * 0.35f + deck.dragX
                             cameraDistance = 14f * density
                             rotationY = tiltState.value.x * 26f
                             rotationX = -tiltState.value.y * 26f
                             // paused: the cover shrinks (above), loses its shadow and dims, like Apple Music
                             val playF = ((coverScale - 0.82f) / 0.18f).coerceIn(0f, 1f)
-                            alpha = 0.72f + 0.28f * playF
+                            alpha = (0.72f + 0.28f * playF) * (1f - 0.35f * swipe)
                             shadowElevation = (10f + 18f * playF).dp.toPx()
                             shape = RoundedCornerShape(16.dp)
                             clip = false

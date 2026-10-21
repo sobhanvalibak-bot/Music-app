@@ -71,9 +71,7 @@ fun GlassTabBar(
     p: Palette,
     photo: ImageBitmap?,
     profileName: String,
-    navy: Boolean = false,   // compact icon-only pill in the theme colour
-    // when set, these labelled icons replace the four music tabs (used by the Misc page: SMS, Calls)
-    customTabs: List<Pair<String, @Composable (Color, Modifier) -> Unit>>? = null
+    navy: Boolean = false   // compact icon-only pill in the theme colour
 ) {
     val tabs = listOf(
         "Songs" to Glyph.Note,
@@ -81,7 +79,7 @@ fun GlassTabBar(
         "Artists" to Glyph.Artist,
         "Profile" to Glyph.Artist
     )
-    val count = customTabs?.size ?: tabs.size
+    val count = tabs.size
     val barH = if (navy) 56.dp else BarHeight
     val barShape = RoundedCornerShape(if (navy) 28.dp else 32.dp)
     val lensShape = RoundedCornerShape(if (navy) 24.dp else 28.dp)
@@ -227,7 +225,7 @@ fun GlassTabBar(
         // 3) iOS tab items: icon on top, small label below, selected one tinted.
         Row(Modifier.fillMaxSize().padding(horizontal = 6.dp)) {
             repeat(count) { i ->
-                val label = customTabs?.get(i)?.first ?: tabs[i].first
+                val label = tabs[i].first
                 val glyph = tabs.getOrNull(i)?.second ?: Glyph.Note
                 val sel = i == selected
                 val tint by animateColorAsState(if (navy) (if (sel) p.onTabBar else p.onTabBar.copy(alpha = 0.50f)) else if (sel) p.accent else Color(0xFF9A9AA0), tween(200), label = "tint")
@@ -251,9 +249,7 @@ fun GlassTabBar(
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        if (customTabs != null) {
-                            customTabs[i].second(tint, Modifier.size(if (navy) 24.dp else 22.dp))
-                        } else if (i == 3) {
+                        if (i == 3) {
                             // Profile tab: the user's own photo
                             Avatar(
                                 photo, profileName, p,
@@ -684,8 +680,3 @@ private fun IslandButton(
     }
 }
 
-/** The two tabs of the Misc page. */
-internal val MiscTabs: List<Pair<String, @Composable (Color, Modifier) -> Unit>> = listOf(
-    Pair<String, @Composable (Color, Modifier) -> Unit>("SMS", { c, m -> SmsIcon(SmsIconKind.Message, c, m) }),
-    Pair<String, @Composable (Color, Modifier) -> Unit>("Calls", { c, m -> SmsIcon(SmsIconKind.Phone, c, m) })
-)
