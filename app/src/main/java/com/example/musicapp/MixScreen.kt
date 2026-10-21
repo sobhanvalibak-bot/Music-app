@@ -83,6 +83,12 @@ import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.random.Random
+import android.widget.Toast
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -91,10 +97,11 @@ import kotlinx.coroutines.launch
 //
 // Same flow as Telegram's gift crafting:
 //  1. idle: a flat card with an anvil, a ring that fills as you pick songs, 4 slots around it
-//  2. tap Mix: the rest of the screen blurs out, "Mixing" appears, the card turns into a cube
-//  3. the cube tumbles in every direction and stops on each picked song (that slot vanishes)
-//  4. it finally stops on the result face and the combined cover appears (+ confetti)
-// ALL picked songs are mixed, only their order is random.
+//  2. tap Mix: the rest of the screen slowly blurs out, "Mixing" appears, the card turns into a cube
+//  3. one by one the song covers float into the cube and the cube slowly turns to show each of them
+//  4. the cube keeps turning until the real audio is ready, then settles on the result face and the
+//     four covers appear together as the cover of ONE new song (saved in the "Mixes" playlist)
+// A short part of every picked song is cut out automatically; only the order is random.
 
 private enum class MixPhase { Idle, Running, Done }
 
@@ -191,12 +198,15 @@ fun MixPage(
     topPad: Dp,
     bottomPad: Dp,
     onBack: () -> Unit,
-    onPlay: (List<Song>) -> Unit,
-    onSavePlaylist: (String, List<Song>) -> Unit
+    onPlay: (Song) -> Unit,
+    onAddToPlaylist: (Song) -> Unit,
+    /** Builds the real mix (audio + cover), saves it and puts it in the Mixes playlist. Null = failed. */
+    render: suspend (List<Song>, android.graphics.Bitmap?) -> Song?
 ) {
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
+    val context = LocalContext.current
 
     val slots = remember { mutableStateListOf<Song?>(null, null, null, null) }
     var picking by remember { mutableIntStateOf(-1) }
@@ -204,7 +214,8 @@ fun MixPage(
     var picked by remember { mutableStateOf<List<Song>>(emptyList()) }
     var faces by remember { mutableStateOf<List<Song?>>(List(6) { null }) }
     var resultFace by remember { mutableIntStateOf(0) }
-    var saved by remember { mutableStateOf(false) }
+    var mixSong by remember { mutableStateOf<Song?>(null) }
+    var collage by remember { mutableStateOf<ImageBitmap?>(null) }
     var arena by remember { mutableStateOf(Size.Zero) }
 
     val ax = remember { Animatable(0f) }
@@ -248,13 +259,13 @@ fun MixPage(
         frame++
     }
 
-    suspend fun land(face: Int, ms: Int, easing: Easing) {
+    suspend fun land(face: Int, ms: Int, easing: Easing, turns: Int = 0) {
         val bx = FBASE[face][0]
         val by = FBASE[face][1]
-        // extra full turns on random axes, then land exactly on the face
-        fun extra() = if (Random.nextFloat() < 0.8f) (if (Random.nextBoolean()) 1 else -1) * (1 + Random.nextInt(2)) * 360f else 0f
-        val tx = bx + ((ax.value - bx) / 360f).roundToInt() * 360f + extra()
-        val ty = by + ((ay.value - by) / 360f).roundToInt() * 360f + extra()
+        // shortest way to the face, plus [turns] full slow turns around the vertical axis
+        val dir = if (Random.nextBoolean()) 1 else -1
+        val tx = bx + ((ax.value - bx) / 360f).roundToInt() * 360f
+        val ty = by + ((ay.value - by) / 360f).roundToInt() * 360f + dir * turns * 360f
         coroutineScope {
             launch { ax.animateTo(tx, tween(ms, easing = easing)) }
             launch { ay.animateTo(ty, tween(ms, easing = easing)) }
@@ -281,47 +292,80 @@ fun MixPage(
         if (chosen.size < 2 || phase == MixPhase.Running) return
         scope.launch {
             phase = MixPhase.Running
-            saved = false
+            mixSong = null
+            collage = null
             val order = chosen.shuffled()            // every picked song is mixed, only the order is random
             picked = order
             val all = (0..5).shuffled()
             val rf = all[0]                          // the face that ends up showing the result
             val songFaces = all.drop(1).take(order.size)
-            val arr = arrayOfNulls<Song>(6)
-            order.forEachIndexed { i, s -> arr[songFaces[i]] = s }
-            faces = arr.toList()
+            faces = List(6) { null }                 // a face shows its cover only once that song has flown in
             resultFace = rf
             reveal.snapTo(0f); settle.snapTo(1f)
             gone.forEach { it.snapTo(0f) }
 
-            // 1) rest of the screen blurs out, ring disappears
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            launch { uiHide.animateTo(1f, tween(350)) }
-            launch { ringA.animateTo(0f, tween(300)) }
-            delay(450)
-
-            // 2) tumble in every direction and stop on the face of every song
-            order.forEachIndexed { i, s ->
-                land(songFaces[i], 1000, CubicBezierEasing(0.45f, 0f, 0.2f, 1f))
-                val si = slots.indexOf(s)
-                if (si >= 0) launch { gone[si].animateTo(1f, tween(400)) }
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                delay(150)
+            // the real audio is built while the animation plays
+            val job = async {
+                try {
+                    val cb = withContext(Dispatchers.Default) { MixCover.build(context, order) }
+                    collage = cb.asImageBitmap()
+                    render(order, cb)
+                } catch (e: Exception) {
+                    null
+                }
             }
 
-            // 3) last, slower spin: stop on the result face
-            land(rf, 1500, CubicBezierEasing(0.3f, 0.6f, 0.2f, 1f))
-            delay(200)
+            // 1) the rest of the screen slowly blurs out, the ring disappears
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            launch { uiHide.animateTo(1f, tween(900, easing = FastOutSlowInEasing)) }
+            launch { ringA.animateTo(0f, tween(700)) }
+            delay(1300)
 
-            // 4) reveal the combined cover
+            // 2) song by song: the cover floats into the cube while the cube slowly turns to that face
+            val glide = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
+            order.forEachIndexed { i, s ->
+                val face = songFaces[i]
+                faces = faces.toMutableList().also { it[face] = s }
+                val si = slots.indexOf(s)
+                coroutineScope {
+                    if (si >= 0) launch { gone[si].animateTo(1f, tween(1700, easing = CubicBezierEasing(0.5f, 0f, 0.3f, 1f))) }
+                    launch { land(face, 2300, glide) }
+                }
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                delay(500)
+            }
+
+            // 3) keep turning slowly until the audio is ready (at least a short while, so it never looks stuck)
+            do {
+                ay.animateTo(ay.value + 120f, tween(2600, easing = LinearEasing))
+            } while (!job.isCompleted)
+            val made = job.await()
+
+            if (made == null) {
+                // failed (the reason was shown by the caller): back to the start
+                gone.forEach { g -> launch { g.animateTo(0f, tween(500)) } }
+                faces = List(6) { null }
+                picked = emptyList()
+                phase = MixPhase.Idle
+                launch { ringA.animateTo(1f, tween(400)) }
+                uiHide.animateTo(0f, tween(600))
+                return@launch
+            }
+
+            // 4) last, slow, long spin: it stops on the result face
+            land(rf, 3600, CubicBezierEasing(0.25f, 0.6f, 0.2f, 1f), 1)
+            delay(300)
+
+            // 5) reveal the combined cover
+            mixSong = made
             phase = MixPhase.Done
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            burst(60, 1000f)
-            launch { reveal.animateTo(1f, tween(700)) }
-            launch { settle.animateTo(1.18f, spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow)) }
-            delay(900)
-            gone.forEach { g -> launch { g.animateTo(0f, tween(450)) } }
-            uiHide.animateTo(0f, tween(450))
+            burst(36, 750f)
+            launch { reveal.animateTo(1f, tween(1500, easing = FastOutSlowInEasing)) }
+            launch { settle.animateTo(1.18f, spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessVeryLow)) }
+            delay(1700)
+            gone.forEach { g -> launch { g.animateTo(0f, tween(500)) } }
+            uiHide.animateTo(0f, tween(800))
         }
     }
 
@@ -360,7 +404,7 @@ fun MixPage(
             val ys = floatArrayOf(hPx / 2f - sPx - gap, hPx / 2f + gap, hPx / 2f - sPx - gap, hPx / 2f + gap)
 
             CubeCanvas(
-                faces = shown, resultFace = resultFace, picked = picked, reveal = reveal,
+                faces = shown, resultFace = resultFace, picked = picked, collage = collage, reveal = reveal,
                 ringFrac = count / 4f, ringA = ringA, p = p, ax = ax, ay = ay,
                 modifier = Modifier.align(Alignment.Center).size(w * 0.62f).graphicsLayer {
                     scaleX = settle.value; scaleY = settle.value
@@ -376,10 +420,13 @@ fun MixPage(
                         .offset { IntOffset(xs[i].roundToInt(), ys[i].roundToInt()) }
                         .size(s)
                         .graphicsLayer {
+                            // the cover floats to the middle, shrinks and melts into the cube
                             val g = gone[i].value
-                            val sc = 1f - 0.4f * g
+                            translationX = (wPx / 2f - (xs[i] + sPx / 2f)) * g
+                            translationY = (hPx / 2f - (ys[i] + sPx / 2f)) * g
+                            val sc = 1f - 0.55f * g
                             scaleX = sc; scaleY = sc
-                            alpha = 1f - g
+                            alpha = 1f - ((g - 0.72f) / 0.28f).coerceIn(0f, 1f)
                         },
                     onClick = { if (phase != MixPhase.Running) picking = i },
                     onClear = { if (phase != MixPhase.Running) { slots[i] = null; edited() } }
@@ -410,7 +457,7 @@ fun MixPage(
                 ) {
                     when (phase) {
                         MixPhase.Idle -> Text(
-                            if (count < 2) "Pick 2 to 4 songs to blend together" else "$count songs ready. All of them will be mixed.",
+                            if (count < 2) "Pick 2 to 4 songs. A part of each one is cut out and blended into one new song." else "$count songs ready. They become ONE song, saved in your Mixes playlist.",
                             color = p.secondary, fontSize = 15.sp, textAlign = TextAlign.Center
                         )
                         MixPhase.Running -> Spacer(Modifier.height(1.dp))
@@ -419,7 +466,12 @@ fun MixPage(
                                 picked.joinToString(" × ") { it.title }, color = p.text, fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis
                             )
-                            Text("${picked.size}-song mix", color = p.secondary, fontSize = 14.sp)
+                            val ms = mixSong?.durationMs ?: 0L
+                            Text(
+                                "${picked.size}-song mix" + if (ms > 0) " · ${ms / 60000}:${"%02d".format(ms / 1000 % 60)}" else "",
+                                color = p.secondary, fontSize = 14.sp
+                            )
+                            Text("Saved in the playlist “Mixes”", color = p.secondary, fontSize = 12.sp)
                         }
                     }
                 }
@@ -437,14 +489,8 @@ fun MixPage(
                     ) { startMix() }
                     if (phase == MixPhase.Done) {
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            MixPill("Play mix", p, filled = false, enabled = true, modifier = Modifier.weight(1f)) { onPlay(picked) }
-                            MixPill(
-                                if (saved) "Saved ✓" else "Save playlist", p, filled = false, enabled = !saved,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                onSavePlaylist("Mix: " + picked.joinToString(" × ") { it.title }.take(40), picked)
-                                saved = true
-                            }
+                            MixPill("Play mix", p, filled = false, enabled = mixSong != null, modifier = Modifier.weight(1f)) { mixSong?.let(onPlay) }
+                            MixPill("Add to playlist", p, filled = false, enabled = mixSong != null, modifier = Modifier.weight(1f)) { mixSong?.let(onAddToPlaylist) }
                         }
                     }
                 }
@@ -456,10 +502,10 @@ fun MixPage(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text("Mixing", color = p.text, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-                Text("Random order", color = p.secondary, fontSize = 14.sp)
+                Text("Cutting a part of each song", color = p.secondary, fontSize = 14.sp)
                 Spacer(Modifier.height(14.dp))
                 Box(Modifier.clip(RoundedCornerShape(14.dp)).background(p.card).padding(horizontal = 12.dp, vertical = 6.dp)) {
-                    Text("All $mixCount songs will be blended", color = p.text, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Text("$mixCount songs become one", color = p.text, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 }
             }
         }
@@ -518,6 +564,7 @@ private fun CubeCanvas(
     faces: List<Song?>,
     resultFace: Int,
     picked: List<Song>,
+    collage: ImageBitmap?,
     reveal: Animatable<Float, *>,
     ringFrac: Float,
     ringA: Animatable<Float, *>,
@@ -575,7 +622,7 @@ private fun CubeCanvas(
             val facePath = polyPath(ROUND_FACE, m)
             val song = faces.getOrNull(f)
             val bmp = song?.let { bmps[it.id] }
-            val isResult = song == null && f == resultFace && rv > 0.01f && picked.size >= 2
+            val isResult = song == null && f == resultFace && rv > 0.01f && picked.size >= 2 && collage != null
 
             if (song != null && bmp != null) {
                 drawPath(facePath, p.coverBottom)
@@ -599,28 +646,22 @@ private fun CubeCanvas(
                 // empty face: slate card with an anvil
                 drawPath(facePath, slate)
                 drawPath(polyPath(ANVIL, m), glyph.copy(alpha = 0.95f * (1f - rv)))
-                if (isResult) {
-                    // the result face turns into the combined cover
+                if (isResult && collage != null) {
+                    // the result face turns into the four covers together
                     drawIntoCanvas { c ->
                         val nc = c.nativeCanvas
-                        val list = picked.take(4)
-                        list.forEachIndexed { i, sg ->
-                            val ab = bmps[sg.id]?.asAndroidBitmap()
-                            if (ab != null) {
-                                val bw = ab.width.toFloat()
-                                val bh = ab.height.toFloat()
-                                val mb = AMatrix()
-                                mb.setPolyToPoly(floatArrayOf(0f, 0f, bw, 0f, bw, bh, 0f, bh), 0, pts, 0, 4)
-                                val slice = polyPath(slicePolygon(list.size, i), m)
-                                paint.alpha = (rv * 255f).toInt().coerceIn(0, 255)
-                                nc.save()
-                                nc.clipPath(facePath.asAndroidPath())
-                                nc.clipPath(slice.asAndroidPath())
-                                nc.concat(mb)
-                                nc.drawBitmap(ab, 0f, 0f, paint)
-                                nc.restore()
-                            }
-                        }
+                        val ab = collage.asAndroidBitmap()
+                        val bw = ab.width.toFloat()
+                        val bh = ab.height.toFloat()
+                        val mb = AMatrix()
+                        mb.setPolyToPoly(floatArrayOf(0f, 0f, bw, 0f, bw, bh, 0f, bh), 0, pts, 0, 4)
+                        paint.alpha = (rv * 255f).toInt().coerceIn(0, 255)
+                        nc.save()
+                        nc.clipPath(facePath.asAndroidPath())
+                        nc.concat(mb)
+                        nc.drawBitmap(ab, 0f, 0f, paint)
+                        nc.restore()
+                        paint.alpha = 255
                     }
                 }
             }

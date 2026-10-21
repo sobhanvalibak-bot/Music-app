@@ -86,6 +86,8 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
         player = p
+        // "Play next" must stay next even when shuffle is on
+        p.setShuffleOrder(PlayNextShuffleOrder(0))
         p.skipSilenceEnabled = prefs.getBoolean("skip_silence", false)
 
         p.addListener(object : Player.Listener {

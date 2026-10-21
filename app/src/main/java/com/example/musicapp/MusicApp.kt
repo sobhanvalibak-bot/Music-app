@@ -300,6 +300,7 @@ fun MusicApp(
     }
 
     val songs = remember(songsVersion, OnlineDownloader.version) { loadSongs(context) }
+    remember { MixStore.init(context) } // which songs are mixes + their collage covers
     remember { OnlineRegistry.init(context) } // online songs saved earlier (favorites, playlists, recent)
     // songs on the device plus the online songs the app has seen
     val byId: Map<Long, Song> = remember(songs) { SongIndex(songs.associateBy { it.id }) }
@@ -329,6 +330,11 @@ fun MusicApp(
     }
     val favSet = profile.favorites.toSet()
     val songOfDay = remember(songs) { listenLog.songOfDay(songs, favSet) }
+
+    // Home > Categories: a new random order every time the app is opened
+    var categoryMode by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var categorySeed by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(System.nanoTime()) }
+    val categories = remember(songs, favSet, categorySeed) { buildCategories(songs, favSet, categorySeed) }
 
     // Playback runs in PlaybackService (media session + notification + lock screen).
     var controller by remember { mutableStateOf<MediaController?>(null) }
@@ -435,6 +441,23 @@ fun MusicApp(
                     currentWindow = c.currentMediaItemIndex
                 }
                 override fun onRepeatModeChanged(mode: Int) { repeatMode = mode }
+                override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                    if (reason != Player.DISCONTINUITY_REASON_AUTO_TRANSITION &&
+                        reason != Player.DISCONTINUITY_REASON_SKIP &&
+                        reason != Player.DISCONTINUITY_REASON_SEEK
+                    ) return
+                    if (oldPosition.mediaItemIndex == newPosition.mediaItemIndex) return
+                    val oldItem = oldPosition.mediaItem ?: return
+                    if (oldItem.mediaMetadata.extras?.getBoolean("upnext") != true) return
+                    val oldIdx = oldPosition.mediaItemIndex
+                    // a "Play next" song is used once: drop it so repeat / the next lap does not play it again
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        if (oldIdx in 0 until c.mediaItemCount && oldIdx != c.currentMediaItemIndex) {
+                            val it2 = c.getMediaItemAt(oldIdx)
+                            if (it2.mediaId == oldItem.mediaId && it2.mediaMetadata.extras?.getBoolean("upnext") == true) c.removeMediaItem(oldIdx)
+                        }
+                    }
+                }
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     currentWindow = c.currentMediaItemIndex
                     run {
@@ -498,12 +521,47 @@ fun MusicApp(
         c.play()
     }
 
+    /**
+     * "Play next" state: the list index of the last song that is already waiting as "Play next"
+     * (or the current song if none) and those waiting songs in the order they will play.
+     */
+    fun upNextState(c: Player): Pair<Int, List<MediaItem>> {
+        val t = c.currentTimeline
+        val cur = c.currentMediaItemIndex
+        if (t.isEmpty || cur < 0) return cur to emptyList()
+        val sh = c.shuffleModeEnabled
+        var last = cur
+        val waiting = ArrayList<MediaItem>()
+        var i = t.getNextWindowIndex(cur, Player.REPEAT_MODE_OFF, sh)
+        while (i != androidx.media3.common.C.INDEX_UNSET) {
+            val item = c.getMediaItemAt(i)
+            if (item.mediaMetadata.extras?.getBoolean("upnext") != true) break
+            waiting.add(item)
+            last = i
+            i = t.getNextWindowIndex(i, Player.REPEAT_MODE_OFF, sh)
+        }
+        return last to waiting
+    }
+
+    // "Play next" always goes right after the current song (and after the songs already waiting as "Play next"):
+    // it does not matter which page / category the queue came from, or whether shuffle or repeat is on.
+    fun insertUpNext(c: Player, list: List<Song>) {
+        list.forEach { OnlineRegistry.remember(it) }
+        val insertAt = upNextState(c).first + 1
+        val ended = c.playbackState == Player.STATE_ENDED
+        c.addMediaItems(insertAt, list.map { it.toMediaItem(upNext = true) })
+        if (c.repeatMode == Player.REPEAT_MODE_ONE) {
+            // repeat one would play the current song forever and never reach the next one
+            c.repeatMode = Player.REPEAT_MODE_ALL
+            Toast.makeText(context, "Repeat one turned into repeat all so your next song can play", Toast.LENGTH_SHORT).show()
+        }
+        if (ended) { c.seekTo(insertAt, 0L); c.play() }
+    }
+
     fun queueNext(song: Song) {
         val c = controller ?: return
         if (c.mediaItemCount == 0) { playOne(song); return }
-        OnlineRegistry.remember(song)
-        val insertAt = (c.currentMediaItemIndex + 1).coerceAtLeast(0)
-        c.addMediaItem(insertAt, song.toMediaItem())
+        insertUpNext(c, listOf(song))
         Toast.makeText(context, "Will play next: ${song.title}", Toast.LENGTH_SHORT).show()
     }
 
@@ -512,8 +570,43 @@ fun MusicApp(
         val c = controller ?: return
         if (c.mediaItemCount == 0) { playOne(song); return }
         OnlineRegistry.remember(song)
-        c.addMediaItem(song.toMediaItem())
+        val last = c.currentTimeline.getLastWindowIndex(c.shuffleModeEnabled)
+            .takeIf { it != androidx.media3.common.C.INDEX_UNSET } ?: (c.mediaItemCount - 1)
+        c.addMediaItem(last + 1, song.toMediaItem())
         Toast.makeText(context, "Added to queue: ${song.title}", Toast.LENGTH_SHORT).show()
+    }
+
+    fun toggleShuffle() { controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } }
+    fun cycleRepeat() {
+        controller?.let {
+            it.repeatMode = when (it.repeatMode) {
+                Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                else -> Player.REPEAT_MODE_OFF
+            }
+        }
+    }
+
+    // Shuffle / repeat of a category: first make the category the queue (the playing song and the
+    // "Play next" songs stay), so "repeat album" repeats that album and shuffle shuffles only it.
+    fun adoptCategory(cat: SongCategory) {
+        val c = controller ?: return
+        val now = current ?: return
+        val idx = cat.songs.indexOfFirst { it.id == now.id }
+        if (idx < 0) return
+        val ids = cat.songs.map { it.id.toString() }
+        val plain = (0 until c.mediaItemCount)
+            .map { c.getMediaItemAt(it) }
+            .filter { it.mediaMetadata.extras?.getBoolean("upnext") != true }
+            .map { it.mediaId }
+        if (plain == ids) return
+        val waiting = upNextState(c).second
+        val pos = c.currentPosition
+        val wasPlaying = c.isPlaying
+        c.setMediaItems(cat.songs.map { it.toMediaItem() }, idx, pos)
+        if (waiting.isNotEmpty()) c.addMediaItems(idx + 1, waiting)
+        c.prepare()
+        if (wasPlaying) c.play()
     }
 
     // Online song: switch between sound only and picture + sound, keeping the position.
@@ -532,8 +625,7 @@ fun MusicApp(
         val c = controller ?: return
         if (list.isEmpty()) return
         if (c.mediaItemCount == 0) { playQueue(list, 0); return }
-        val insertAt = (c.currentMediaItemIndex + 1).coerceAtLeast(0)
-        c.addMediaItems(insertAt, list.map { it.toMediaItem() })
+        insertUpNext(c, list)
         Toast.makeText(context, "Will play next (${list.size} songs)", Toast.LENGTH_SHORT).show()
     }
 
@@ -734,10 +826,21 @@ fun MusicApp(
                             topPad = topPad,
                             bottomPad = bottomPad,
                             onBack = { sub = Sub.None },
-                            onPlay = { playQueue(it, 0) },
-                            onSavePlaylist = { name, list ->
-                                val pl = profile.createPlaylist(name, list.first().id)
-                                list.drop(1).forEach { profile.addToPlaylist(pl.id, it.id) }
+                            onPlay = { m -> playQueue(listOf(byId[m.id] ?: m), 0) },
+                            onAddToPlaylist = { m -> addTarget = byId[m.id] ?: m },
+                            render = { list, cover ->
+                                try {
+                                    val made = MixEngine.create(context, list, cover)
+                                    // the finished mix is one song, saved in the "Mixes" playlist
+                                    val pl = profile.playlists.firstOrNull { it.name == "Mixes" } ?: profile.createPlaylist("Mixes")
+                                    profile.addToPlaylist(pl.id, made.id)
+                                    songsVersion++
+                                    made
+                                } catch (e: Exception) {
+                                    android.util.Log.e("MixEngine", "mix failed", e)
+                                    Toast.makeText(context, "Mix failed: ${e.message ?: "unknown error"}".take(140), Toast.LENGTH_LONG).show()
+                                    null
+                                }
                             }
                         )
                     }
@@ -844,7 +947,16 @@ fun MusicApp(
                     onAddToQueue = { queueEnd(it) },
                     onEditInfo = { editTarget = it },
                     showIndex = settings.sort == 2,
-                    onOpenSearch = { searching = true }
+                    onOpenSearch = { searching = true },
+                    categories = categories,
+                    categoryMode = categoryMode,
+                    onCategoryMode = { categoryMode = it },
+                    onReroll = { categorySeed = System.nanoTime() },
+                    shuffle = shuffle,
+                    repeatMode = repeatMode,
+                    onPlayCategory = { cat, i -> playQueue(cat.songs, i) },
+                    onCategoryShuffle = { cat -> adoptCategory(cat); toggleShuffle() },
+                    onCategoryRepeat = { cat -> adoptCategory(cat); cycleRepeat() }
                 )
                 1 -> AlbumsTab(
                     albums, p, sortSubtitle, topPad, bottomPad,

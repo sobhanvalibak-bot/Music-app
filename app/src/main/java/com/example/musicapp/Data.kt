@@ -60,10 +60,10 @@ class ArtistGroup(val name: String, val songs: List<Song>)
 val albumArtBase: Uri = Uri.parse("content://media/external/audio/albumart")
 
 /** [video] only matters for online songs: true = picture and sound, false = sound only. */
-fun Song.toMediaItem(video: Boolean = false): MediaItem {
+fun Song.toMediaItem(video: Boolean = false, upNext: Boolean = false): MediaItem {
     val remote = remoteId
     val playUri = if (remote != null) onlineMediaUri(remote, video) else uri
-    val art = if (remote != null) artUrl?.let { Uri.parse(it) } else ContentUris.withAppendedId(albumArtBase, albumId)
+    val art = if (remote != null) artUrl?.let { Uri.parse(it) } else (MixStore.coverUri(id) ?: ContentUris.withAppendedId(albumArtBase, albumId))
     return MediaItem.Builder()
         .setMediaId(id.toString())
         .setUri(playUri)
@@ -75,6 +75,7 @@ fun Song.toMediaItem(video: Boolean = false): MediaItem {
                 .setArtist(artist)
                 .setAlbumTitle(album)
                 .setArtworkUri(art)
+                .apply { if (upNext) setExtras(android.os.Bundle().apply { putBoolean("upnext", true) }) }
                 .build()
         )
         .setRequestMetadata(MediaItem.RequestMetadata.Builder().setMediaUri(playUri).build())

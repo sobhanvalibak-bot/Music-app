@@ -299,7 +299,16 @@ fun SongsTab(
     onAddToQueue: ((Song) -> Unit)? = null,
     onEditInfo: (Song) -> Unit = {},
     showIndex: Boolean = false,
-    onOpenSearch: () -> Unit = {}
+    onOpenSearch: () -> Unit = {},
+    categories: List<SongCategory> = emptyList(),
+    categoryMode: Boolean = false,
+    onCategoryMode: (Boolean) -> Unit = {},
+    onReroll: () -> Unit = {},
+    shuffle: Boolean = false,
+    repeatMode: Int = 0,
+    onPlayCategory: (SongCategory, Int) -> Unit = { _, _ -> },
+    onCategoryShuffle: (SongCategory) -> Unit = {},
+    onCategoryRepeat: (SongCategory) -> Unit = {}
 ) {
     val density = LocalDensity.current
     val listState = rememberLazyListState()
@@ -460,9 +469,11 @@ fun SongsTab(
                     }
                 }
             }
-            SectionHeader("All tracks", "", p) { }
+            Column(Modifier.padding(horizontal = 16.dp)) { CategorySwitch(categoryMode, p, onCategoryMode, onReroll) }
         }
-        itemsIndexed(songs, key = { _, s -> s.id }) { index, song ->
+        if (categoryMode) {
+            categoryItems(categories, current, p, shuffle, repeatMode, onPlayCategory, onCategoryShuffle, onCategoryRepeat)
+        } else itemsIndexed(songs, key = { _, s -> s.id }) { index, song ->
             SongRow(
                 song = song,
                 playing = current?.id == song.id,
@@ -496,7 +507,7 @@ fun SongsTab(
         }
     }
     CollapsingBar("Home", titleProg, p, topPad, Modifier.align(Alignment.TopStart))
-    if (showIndex && songs.size > 20) {
+    if (showIndex && songs.size > 20 && !categoryMode) {
         AlphabetIndex(
             p = p,
             onLetter = { letter ->
