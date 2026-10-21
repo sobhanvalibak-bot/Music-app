@@ -2,7 +2,15 @@ package com.example.musicapp
 
 import android.content.ContentValues
 import android.content.Context
+import android.Manifest
+import android.content.pm.PackageManager
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaMuxer
 import android.media.MediaScannerConnection
+import androidx.core.content.ContextCompat
+import java.nio.ByteBuffer
 import android.os.Build
 import android.os.Environment
 import android.os.Handler
@@ -25,7 +33,7 @@ import org.jaudiotagger.tag.TagOptionSingleton
 import org.jaudiotagger.tag.images.ArtworkFactory
 
 /**
- * Saves an online song on the device (Music/MusicApp), with title, artist and cover inside the file.
+ * Saves an online song on the device (Music/musicapp), with title, artist and cover inside the file.
  * After it is saved it shows up in Songs like any other file on the phone.
  *
  * Progress of every download is in [progress]: 0..<1 while downloading, 1 once saved.
@@ -37,6 +45,10 @@ object OnlineDownloader {
     var version by mutableIntStateOf(0)
 
     private const val CHUNK = 8L * 1024L * 1024L
+    private const val FOLDER = "musicapp"
+
+    /** Set by the UI: asks for the storage permission (Android 9 and older) and then starts the download again. */
+    var requestWrite: ((Song) -> Unit)? = null
     private val main = Handler(Looper.getMainLooper())
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -58,15 +70,22 @@ object OnlineDownloader {
             return
         }
         if (isDone(song.id)) {
-            toast(context, "Already saved in Music/MusicApp")
+            toast(context, "Already saved in Music/musicapp")
             return
         }
         val app = context.applicationContext
+        if (Build.VERSION.SDK_INT <= 28 &&
+            ContextCompat.checkSelfPermission(app, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+        ) {
+            val ask = requestWrite
+            if (ask != null) { ask(song); return }
+        }
         AppLog.i("download", "start: ${song.title} (${song.sourceName})")
         progress[song.id] = 0f
         toast(app, "Downloading: ${song.title}")
         Thread {
             var cache: File? = null
+            var remuxed: File? = null
             try {
                 val source = try {
                     OnlineEngine.audioSource(page)
@@ -87,8 +106,16 @@ object OnlineDownloader {
                     Unit
                 }
                 if (source.hls) downloadHls(source.url, file, report) else download(source.url, file, report)
-                writeTags(app, song, file)
-                save(app, song, file, source.ext, source.mime)
+                // A playlist of pieces glued together has no total length inside it, so players show a
+                // length that keeps growing while it plays. Re-pack the AAC into a proper .m4a first.
+                var ready = file
+                var ext = source.ext
+                var mime = source.mime
+                if (source.hls && source.mime != "audio/mpeg") {
+                    remux(file)?.let { ready = it; remuxed = it; ext = "m4a"; mime = "audio/mp4" }
+                }
+                writeTags(app, song, ready)
+                save(app, song, ready, ext, mime)
 
                 main.post {
                     progress[song.id] = 1f
@@ -103,6 +130,7 @@ object OnlineDownloader {
             } finally {
                 try {
                     cache?.delete()
+                    remuxed?.delete()
                 } catch (_: Exception) {
                 }
             }
@@ -216,6 +244,55 @@ object OnlineDownloader {
         return n
     }
 
+    // ───────────────────────── Fix the length of glued HLS pieces ─────────────────────────
+
+    /** Copies the AAC samples into a normal MPEG-4 audio file (real duration, seekable). Null if it cannot. */
+    private fun remux(src: File): File? {
+        val out = File(src.parentFile, "rm_${System.nanoTime()}.m4a")
+        val ex = MediaExtractor()
+        var muxer: MediaMuxer? = null
+        try {
+            ex.setDataSource(src.absolutePath)
+            var track = -1
+            var fmt: MediaFormat? = null
+            for (i in 0 until ex.trackCount) {
+                val f = ex.getTrackFormat(i)
+                if (f.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) { track = i; fmt = f; break }
+            }
+            if (track < 0 || fmt == null || fmt.getString(MediaFormat.KEY_MIME) != "audio/mp4a-latm") return null
+            ex.selectTrack(track)
+            val m = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            muxer = m
+            val mt = m.addTrack(fmt)
+            m.start()
+            val buf = ByteBuffer.allocate(1 shl 20)
+            val info = MediaCodec.BufferInfo()
+            var first = -1L
+            while (true) {
+                buf.clear()
+                val n = ex.readSampleData(buf, 0)
+                if (n < 0) break
+                val t = ex.sampleTime
+                if (first < 0L) first = t
+                val flags = if (ex.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
+                info.set(0, n, (t - first).coerceAtLeast(0L), flags)
+                m.writeSampleData(mt, buf, info)
+                ex.advance()
+            }
+            m.stop()
+            m.release()
+            muxer = null
+            return if (out.length() > 1024L) out else { out.delete(); null }
+        } catch (e: Throwable) {
+            AppLog.w("download", "could not fix the length (${e.javaClass.simpleName}), saving the file as it is")
+            try { muxer?.release() } catch (_: Throwable) { }
+            out.delete()
+            return null
+        } finally {
+            try { ex.release() } catch (_: Throwable) { }
+        }
+    }
+
     // ───────────────────────── Tags + cover (optional: a failure here never stops the download) ─────────────────────────
 
     private fun writeTags(context: Context, song: Song, file: File) {
@@ -276,7 +353,7 @@ object OnlineDownloader {
             val values = ContentValues().apply {
                 put(MediaStore.Audio.Media.DISPLAY_NAME, name)
                 put(MediaStore.Audio.Media.MIME_TYPE, mime)
-                put(MediaStore.Audio.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MUSIC}/MusicApp")
+                put(MediaStore.Audio.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MUSIC}/$FOLDER")
                 put(MediaStore.Audio.Media.TITLE, song.title)
                 put(MediaStore.Audio.Media.ARTIST, song.artist.ifBlank { "Unknown Artist" })
                 put(MediaStore.Audio.Media.ALBUM, "Downloads")
@@ -299,13 +376,13 @@ object OnlineDownloader {
             }
         } else {
             // Android 9 and older: a normal file, then ask the media scanner to add it
-            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "MusicApp")
-            val target = try {
-                dir.mkdirs()
-                File(dir, name).also { file.copyTo(it, overwrite = true) }
-            } catch (_: Exception) {
-                val alt = File(context.getExternalFilesDir(Environment.DIRECTORY_MUSIC), "MusicApp").apply { mkdirs() }
-                File(alt, name).also { file.copyTo(it, overwrite = true) }
+            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), FOLDER)
+            dir.mkdirs()
+            val target = File(dir, name)
+            try {
+                file.copyTo(target, overwrite = true)
+            } catch (e: Exception) {
+                throw IOException("Cannot write to Music/$FOLDER (storage permission?)", e)
             }
             MediaScannerConnection.scanFile(context, arrayOf(target.absolutePath), arrayOf(mime), null)
         }

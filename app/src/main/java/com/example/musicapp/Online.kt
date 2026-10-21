@@ -294,6 +294,49 @@ object OnlineEngine {
         return "audio ${a.size} (file $prog, hls $hls, other ${a.size - prog - hls}), video ${info.videoStreams.size}"
     }
 
+    // NewPipe's SoundCloud / YouTube extractors share state (the client id, cookies) and fail when several
+    // songs are resolved at the same moment (play + retry + download), so one lookup runs at a time.
+    // Waiting callers give up at once if the player cancels the load.
+    private val resolveLock = java.util.concurrent.locks.ReentrantLock()
+
+    private inline fun <T> locked(block: () -> T): T {
+        try {
+            resolveLock.lockInterruptibly()
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw java.io.InterruptedIOException("cancelled")
+        }
+        try {
+            return block()
+        } finally {
+            resolveLock.unlock()
+        }
+    }
+
+    /** StreamInfo.getInfo with up to 3 tries: sites sometimes answer with an empty stream list the first time. */
+    private fun getInfo(pageUrl: String): StreamInfo {
+        var last: Exception? = null
+        for (n in 0 until 3) {
+            try {
+                return StreamInfo.getInfo(pageUrl)
+            } catch (e: Exception) {
+                if (e is java.io.InterruptedIOException || e.cause is java.io.InterruptedIOException) throw e
+                if (isBlocked(e.message)) throw e
+                last = e
+                AppLog.w("resolve", "try ${n + 1} failed (${e.javaClass.simpleName}), ${if (n < 2) "trying again" else "giving up"}")
+                if (n < 2) {
+                    try {
+                        Thread.sleep(700L)
+                    } catch (ie: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        throw java.io.InterruptedIOException("cancelled")
+                    }
+                }
+            }
+        }
+        throw last ?: IOException("Could not load this song")
+    }
+
     /** Forget every saved address (after signing in or out). */
     fun clearCache() = urlCache.clear()
 
@@ -360,12 +403,20 @@ object OnlineEngine {
     @Throws(IOException::class)
     fun streamUrl(pageUrl: String, video: Boolean): String {
         val key = "$pageUrl|$video"
+        urlCache[key]?.let { if (it.second > System.currentTimeMillis()) return it.first }
+        // whoever waited here finds the answer in the cache when it is their turn
+        return locked { streamUrlLocked(pageUrl, video) }
+    }
+
+    @Throws(IOException::class)
+    private fun streamUrlLocked(pageUrl: String, video: Boolean): String {
+        val key = "$pageUrl|$video"
         val now = System.currentTimeMillis()
         urlCache[key]?.let { if (it.second > now) return it.first }
         try {
             ensureInit()
             AppLog.i("resolve", "${sourceNameOf(pageUrl)} video=$video signedIn=${YoutubeAuth.signedIn}\n$pageUrl")
-            val info = StreamInfo.getInfo(pageUrl)
+            val info = getInfo(pageUrl)
             AppLog.i("resolve", describeStreams(info))
             val tried = mutableListOf<String>()
             var found: String? = null
@@ -418,11 +469,14 @@ object OnlineEngine {
 
     /** Blocking: the best audio file of a page, to save on the device. */
     @Throws(IOException::class)
-    fun audioSource(pageUrl: String): AudioSource {
+    fun audioSource(pageUrl: String): AudioSource = locked { audioSourceLocked(pageUrl) }
+
+    @Throws(IOException::class)
+    private fun audioSourceLocked(pageUrl: String): AudioSource {
         try {
             ensureInit()
             AppLog.i("download", "looking for a file: ${sourceNameOf(pageUrl)} signedIn=${YoutubeAuth.signedIn}\n$pageUrl")
-            val info = StreamInfo.getInfo(pageUrl)
+            val info = getInfo(pageUrl)
             AppLog.i("download", describeStreams(info))
             val tried = mutableListOf<String>()
             val list = audioCandidates(info, DeliveryMethod.PROGRESSIVE_HTTP).map { it to false } +

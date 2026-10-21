@@ -168,6 +168,31 @@ fun MusicApp(
         }
     }
 
+    val allFilesLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        // back from the settings page: try again (in place if it was allowed, else the one-file permission)
+        retryTick++
+    }
+    // Downloads go to Music/musicapp. Android 10+ lets an app add its own files there freely;
+    // Android 9 and older need the storage permission, so it is asked right when a download starts.
+    var pendingDownload by remember { mutableStateOf<Song?>(null) }
+    val downloadPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { ok ->
+        val s = pendingDownload
+        pendingDownload = null
+        if (ok && s != null) OnlineDownloader.start(context, s)
+        else Toast.makeText(context, "Storage permission is needed to save songs in Music/musicapp", Toast.LENGTH_LONG).show()
+    }
+    DisposableEffect(Unit) {
+        OnlineDownloader.requestWrite = { s ->
+            pendingDownload = s
+            downloadPermLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
+        onDispose { OnlineDownloader.requestWrite = null }
+    }
+
     // On start: music permission first (if missing), then notifications.
     LaunchedEffect(Unit) {
         if (!granted) launcher.launch(audioPermission) else askNotifications()
@@ -375,7 +400,7 @@ fun MusicApp(
                     val blocked = OnlineEngine.isBlocked(reason)
                     if (!blocked && onlineRetryId != song.id) {
                         onlineRetryId = song.id
-                        Thread { OnlineEngine.forget(page) }.start()
+                        OnlineEngine.forget(page)
                         c.prepare()
                         c.play()
                         return
@@ -596,6 +621,14 @@ fun MusicApp(
                 } else {
                     grantAsked = true
                     grantLauncher.launch(IntentSenderRequest.Builder(r.sender).build())
+                }
+            }
+            is SaveResult.NeedsAllFilesAccess -> {
+                Toast.makeText(context, "Allow \"All files access\" to edit songs in their own folder", Toast.LENGTH_LONG).show()
+                try {
+                    allFilesLauncher.launch(r.intent)
+                } catch (_: Exception) {
+                    retryTick++
                 }
             }
             is SaveResult.NeedsStoragePermission -> {

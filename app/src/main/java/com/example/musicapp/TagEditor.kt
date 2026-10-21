@@ -7,9 +7,13 @@ import android.content.Intent
 import android.content.IntentSender
 import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
+import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.Process
 import android.provider.MediaStore
+import android.provider.Settings
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -42,13 +46,18 @@ sealed interface SaveResult {
     /** Android 9 and older: needs the storage write permission. */
     data object NeedsStoragePermission : SaveResult
 
+    /** Android 11+: "All files access" lets the tags be written straight into the song in its own folder. */
+    class NeedsAllFilesAccess(val intent: Intent) : SaveResult
+
     class Error(val message: String) : SaveResult
 }
 
 /**
  * Reads and writes the real tags (ID3 for mp3, MP4 atoms for m4a, Vorbis comments for flac/ogg...)
- * with jaudiotagger. The library needs a normal file, so the song is copied to the app cache,
- * edited there, and the result is copied back over the original through MediaStore.
+ * with jaudiotagger. The library needs a normal file: whenever Android lets the app write to the song
+ * where it lives (storage permission on Android 9-, "All files access" on Android 11+), the song is edited
+ * in place in its own folder. Only when that is not allowed, a copy in the app cache is edited and
+ * copied back over the original through MediaStore.
  */
 object TagEditor {
 
@@ -156,30 +165,66 @@ object TagEditor {
         }
     }
 
+    /** The song's real file when this app may write to it directly, else null. */
+    private fun directFile(context: Context, path: String?): File? {
+        if (path == null) return null
+        val f = File(path)
+        if (!f.isFile) return null
+        val allowed = when {
+            Build.VERSION.SDK_INT >= 30 -> Environment.isExternalStorageManager()
+            Build.VERSION.SDK_INT >= 29 -> false
+            else -> ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+        return if (allowed && f.canWrite()) f else null
+    }
+
     /** Writes [edit] into the audio file itself and refreshes MediaStore. */
     suspend fun save(context: Context, song: Song, edit: TagEdit): SaveResult =
         withContext(Dispatchers.IO) {
             val resolver = context.contentResolver
+            val (name, path) = fileInfo(context, song)
+            val direct = directFile(context, path)
 
-            // Android 11+: ask once for permission to modify this file.
-            if (Build.VERSION.SDK_INT >= 30) {
-                val granted = context.checkUriPermission(
-                    song.uri, Process.myPid(), Process.myUid(),
-                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                ) == PackageManager.PERMISSION_GRANTED
-                if (!granted) {
-                    return@withContext SaveResult.NeedsGrant(
-                        MediaStore.createWriteRequest(resolver, listOf(song.uri)).intentSender
-                    )
+            if (direct == null) {
+                // Android 11+: ask once for "All files access", so the song can be edited right in its folder.
+                if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
+                    val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+                    if (!prefs.getBoolean("allfiles_asked", false)) {
+                        prefs.edit().putBoolean("allfiles_asked", true).apply()
+                        return@withContext SaveResult.NeedsAllFilesAccess(
+                            Intent(
+                                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                Uri.parse("package:${context.packageName}")
+                            )
+                        )
+                    }
+                }
+                // Not allowed to touch the file directly: ask for permission to modify this one file.
+                if (Build.VERSION.SDK_INT >= 30) {
+                    val granted = context.checkUriPermission(
+                        song.uri, Process.myPid(), Process.myUid(),
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (!granted) {
+                        return@withContext SaveResult.NeedsGrant(
+                            MediaStore.createWriteRequest(resolver, listOf(song.uri)).intentSender
+                        )
+                    }
+                } else if (Build.VERSION.SDK_INT < 29 && ContextCompat.checkSelfPermission(
+                        context, android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+                    ) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    return@withContext SaveResult.NeedsStoragePermission
                 }
             }
 
             var cache: File? = null
             try {
                 prepareLibrary()
-                val (name, path) = fileInfo(context, song)
-                val file = copyToCache(context, song, extensionOf(name, path))
-                cache = file
+                // in place when allowed; otherwise a copy in the app cache
+                val file = direct ?: copyToCache(context, song, extensionOf(name, path)).also { cache = it }
 
                 val audio = AudioFileIO.read(file)
                 val tag = audio.tagOrCreateAndSetDefault
@@ -202,10 +247,12 @@ object TagEditor {
                 put(FieldKey.TRACK, edit.track)
                 audio.commit()
 
-                // copy the edited file back over the original
-                val out = resolver.openOutputStream(song.uri, "wt")
-                    ?: return@withContext SaveResult.Error("Cannot open the file for writing")
-                out.use { o -> file.inputStream().use { i -> i.copyTo(o) } }
+                if (direct == null) {
+                    // copy the edited file back over the original
+                    val out = resolver.openOutputStream(song.uri, "wt")
+                        ?: return@withContext SaveResult.Error("Cannot open the file for writing")
+                    out.use { o -> file.inputStream().use { i -> i.copyTo(o) } }
+                }
 
                 // update MediaStore right away, then let the scanner re-read the file
                 try {
