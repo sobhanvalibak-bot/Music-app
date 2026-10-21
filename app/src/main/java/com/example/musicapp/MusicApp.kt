@@ -718,6 +718,7 @@ fun MusicApp(
                         onFavorites = { sub = Sub.Favorites },
                         onOpenPlaylist = { sub = Sub.PlaylistPage(it) },
                         onNewPlaylist = { showNewPlaylist = true },
+                        onMix = { sub = Sub.Mix },
                         onPlayFavorites = { list, i -> list.getOrNull(i)?.let { playOne(it) } },
                         onPlayList = { playQueue(it, 0) },
                         onPlayNextList = { queueNextAll(it) },
@@ -726,6 +727,20 @@ fun MusicApp(
                         listenLog = listenLog,
                         onRecap = { sub = Sub.Recap }
                     )
+                    is Sub.Mix -> Box(Modifier.fillMaxSize().swipeBack { sub = Sub.None }.background(p.bgBrush)) {
+                        MixPage(
+                            songs = songs,
+                            p = p,
+                            topPad = topPad,
+                            bottomPad = bottomPad,
+                            onBack = { sub = Sub.None },
+                            onPlay = { playQueue(it, 0) },
+                            onSavePlaylist = { name, list ->
+                                val pl = profile.createPlaylist(name, list.first().id)
+                                list.drop(1).forEach { profile.addToPlaylist(pl.id, it.id) }
+                            }
+                        )
+                    }
                     is Sub.Recap -> Box(Modifier.fillMaxSize().swipeBack { sub = Sub.None }.background(p.bgBrush)) {
                         RecapPage(
                             stats = remember(listenLog.version, byId) { listenLog.month(byId) },

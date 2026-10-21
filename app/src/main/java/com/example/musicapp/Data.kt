@@ -348,5 +348,6 @@ sealed interface Sub {
     data object Settings : Sub
     data object Favorites : Sub
     data object Recap : Sub
+    data object Mix : Sub
     data class PlaylistPage(val id: String) : Sub
 }

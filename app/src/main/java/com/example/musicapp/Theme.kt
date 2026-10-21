@@ -216,7 +216,7 @@ private fun loadRemoteArt(url: String): Bitmap? {
     }
 }
 
-private suspend fun loadArt(context: Context, song: Song, px: Int): ImageBitmap? =
+suspend fun loadArt(context: Context, song: Song, px: Int): ImageBitmap? =
     withContext(Dispatchers.IO) {
         try {
             if (song.isOnline) return@withContext song.artUrl?.let { loadRemoteArt(it)?.asImageBitmap() }

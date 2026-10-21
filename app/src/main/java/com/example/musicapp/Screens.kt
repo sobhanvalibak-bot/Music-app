@@ -832,6 +832,7 @@ fun ProfileTab(
     onFavorites: () -> Unit,
     onOpenPlaylist: (String) -> Unit,
     onNewPlaylist: () -> Unit,
+    onMix: () -> Unit,
     onPlayFavorites: (List<Song>, Int) -> Unit,
     onPlayList: (List<Song>) -> Unit,
     onPlayNextList: (List<Song>) -> Unit,
@@ -1008,6 +1009,21 @@ fun ProfileTab(
                             }
                         }
                     }
+                }
+            }
+        }
+
+        item {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
+                    .clip(RoundedCornerShape(18.dp)).background(p.card).clickable { onMix() }.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                GlyphIcon(Glyph.Shuffle, p.accent, Modifier.size(24.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Mix songs", color = p.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Pick up to 4 songs and blend them into one mix", color = p.secondary, fontSize = 13.sp)
                 }
             }
         }
