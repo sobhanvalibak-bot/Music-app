@@ -172,5 +172,11 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         if (intent?.action == ACTION_OPEN_PLAYER) openPlayerSignal += 1
+        // another app asked to dial a number (a tel: link or "Dial"): open the Calls keypad with it
+        if (intent?.action == Intent.ACTION_DIAL || intent?.action == Intent.ACTION_VIEW) {
+            val d = intent.data
+            if (d?.scheme == "tel") DialRequest.number = android.net.Uri.decode(d.schemeSpecificPart).orEmpty()
+            else if (intent.action == Intent.ACTION_DIAL) DialRequest.number = ""
+        }
     }
 }

@@ -123,7 +123,7 @@ import kotlin.math.sin
 enum class SmsIconKind {
     Grid, Send, Reply, Star, StarFilled, Pin, PinFilled, Copy, Trash, Eye, EyeOff,
     Message, Contacts, Check, ChevronUp, Dot, Bolt, Burst,
-    Phone, Backspace, Keypad, Clock, ArrowIn, ArrowOut
+    Phone, Backspace, Keypad, Clock, ArrowIn, ArrowOut, Mic
 }
 
 @Composable
@@ -317,6 +317,15 @@ fun SmsIcon(kind: SmsIconKind, color: Color, modifier: Modifier = Modifier) {
                     lineTo(w * 0.78f, h * 0.6f)
                 }
                 drawPath(head, color, style = st)
+            }
+            SmsIconKind.Mic -> {
+                drawRoundRect(color, Offset(w * 0.36f, h * 0.1f), Size(w * 0.28f, h * 0.46f), CornerRadius(w * 0.14f), style = st)
+                val arc = Path().apply {
+                    moveTo(w * 0.22f, h * 0.46f)
+                    cubicTo(w * 0.22f, h * 0.8f, w * 0.78f, h * 0.8f, w * 0.78f, h * 0.46f)
+                }
+                drawPath(arc, color, style = st)
+                drawLine(color, Offset(w * 0.5f, h * 0.7f), Offset(w * 0.5f, h * 0.9f), sw, StrokeCap.Round)
             }
             SmsIconKind.Burst -> {
                 for (i in 0 until 8) {

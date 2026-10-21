@@ -337,6 +337,23 @@ private fun CallsApp(p: Palette, topPad: Dp, bottomPad: Dp) {
     var dial by remember { mutableStateOf("") }
     var detail by remember { mutableStateOf<DetailTarget?>(null) }
 
+    // a tel: link from another app: open the keypad with the number in it
+    LaunchedEffect(DialRequest.number) {
+        DialRequest.number?.let {
+            dial = it
+            section = 2
+            DialRequest.number = null
+        }
+    }
+
+    // is this app the phone app? Then Android shows the in-app call screen for every call.
+    var isDefault by remember { mutableStateOf(isDefaultDialer(context)) }
+    var bannerGone by remember { mutableStateOf(false) }
+    LaunchedEffect(tick) { isDefault = isDefaultDialer(context) }
+    val roleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        isDefault = isDefaultDialer(context)
+    }
+
     val nameByKey = remember(contacts) {
         val m = HashMap<String, String>()
         contacts.forEach { c -> c.numbers.forEach { n -> m.putIfAbsent(numKey(n), c.name) } }
@@ -354,6 +371,32 @@ private fun CallsApp(p: Palette, topPad: Dp, bottomPad: Dp) {
             "Calls", color = p.text, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold,
             modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp)
         )
+        if (!isDefault && !bannerGone) {
+            Row(
+                Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp)).background(p.accent.copy(alpha = 0.16f)).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Use this app for calls", color = p.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Shows the in-app call screen when you call or get called.", color = p.secondary, fontSize = 12.sp)
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Set", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(p.accent)
+                        .clickable {
+                            try { roleLauncher.launch(requestDialerIntent(context)) }
+                            catch (_: Exception) { Toast.makeText(context, "Can't change the phone app here", Toast.LENGTH_SHORT).show() }
+                        }
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                )
+                Spacer(Modifier.width(4.dp))
+                Box(Modifier.size(32.dp).clip(CircleShape).clickable { bannerGone = true }, contentAlignment = Alignment.Center) {
+                    Text("×", color = p.secondary, fontSize = 20.sp)
+                }
+            }
+        }
         Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
             Segmented(listOf("Recents", "Contacts", "Keypad"), section, p) { section = it }
         }

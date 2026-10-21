@@ -239,6 +239,15 @@ fun MusicApp(
     var miscTab by remember { mutableIntStateOf(0) }   // 0 = SMS, 1 = Calls
     var miscThread by remember { mutableStateOf(false) }
 
+    LaunchedEffect(DialRequest.number) {
+        if (DialRequest.number != null) {
+            misc = true
+            miscTab = 1
+            searching = false
+            barsVisible = true
+        }
+    }
+
     BackHandler(enabled = searching) { searching = false }
     BackHandler(enabled = misc && !miscThread && !searching) { misc = false }
     BackHandler(enabled = tab == 3 && sub != Sub.None) { sub = Sub.None }
