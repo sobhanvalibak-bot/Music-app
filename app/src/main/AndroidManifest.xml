@@ -19,6 +19,11 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- needed to read the name and icon of the app that sent a notification (Android 11+) -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <!-- Misc page: read and send text messages, show contact names instead of numbers -->
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <application
         android:icon="@mipmap/ic_launcher"
