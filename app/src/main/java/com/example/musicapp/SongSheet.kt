@@ -80,7 +80,7 @@ object SleepMenuBridge {
 fun shareSong(context: Context, song: Song) {
     try {
         val shareText = "${song.title} — ${song.artist}" +
-            if (song.remoteId != null) "\nhttps://youtu.be/${song.remoteId}"
+            if (song.remoteId != null) "\n${song.remoteId}"
             else if (song.album.isNotBlank()) "\n${song.album}" else ""
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"

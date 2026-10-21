@@ -226,7 +226,7 @@ fun FullPlayer(
                         .padding(vertical = 2.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(if (song.isOnline) "Playing from YouTube" else "Playing from Album", fontSize = 12.sp, color = sub, maxLines = 1)
+                    Text(if (song.isOnline) "Playing from ${song.sourceName}" else "Playing from Album", fontSize = 12.sp, color = sub, maxLines = 1)
                     Text(
                         song.album.ifBlank { song.title }, fontSize = 15.sp, fontWeight = FontWeight.Bold,
                         color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis

@@ -25,7 +25,6 @@ import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.exceptions.ReCaptchaException
 import org.schabi.newpipe.extractor.search.SearchInfo
-import org.schabi.newpipe.extractor.services.youtube.linkHandler.YoutubeSearchQueryHandlerFactory
 import org.schabi.newpipe.extractor.stream.DeliveryMethod
 import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
@@ -33,16 +32,17 @@ import org.schabi.newpipe.extractor.MediaFormat
 import org.schabi.newpipe.extractor.downloader.Request as NpRequest
 import org.schabi.newpipe.extractor.downloader.Response as NpResponse
 
-// ───────────────────────── Online songs (YouTube search, listen and watch) ─────────────────────────
+// ───────────────────────── Online songs (YouTube, YouTube Music, SoundCloud, Bandcamp) ─────────────────────────
 //
-// An online song is a normal [Song] with a negative id and a [Song.remoteId] (the video id).
-// Its media item uses the private address  npyt:///VIDEO_ID?v=0|1  and the player's data source
+// An online song is a normal [Song] with a negative id and a [Song.remoteId] (the page address of the track).
+// Its media item uses the private address  npyt://stream?u=PAGE_URL&v=0|1  and the player's data source
 // ([OnlineResolver]) turns that into a fresh stream address right when it is needed. That means
 // queues, favorites, playlists and crossfade keep working even after the old address has expired.
 
 /** One row of the online search results. */
 data class OnlineTrack(
-    val videoId: String,
+    /** Page address of the track (YouTube video, SoundCloud track, Bandcamp track ...). */
+    val url: String,
     val title: String,
     val artist: String,
     val durationMs: Long,
@@ -54,26 +54,40 @@ const val ONLINE_SCHEME = "npyt"
 val Song.isOnline: Boolean get() = remoteId != null
 
 /** Stable negative id for a video, so it never collides with MediaStore ids (always positive). */
-fun onlineSongId(videoId: String): Long =
-    (UUID.nameUUIDFromBytes(videoId.toByteArray()).mostSignificantBits and Long.MAX_VALUE).inv()
+fun onlineSongId(url: String): Long =
+    (UUID.nameUUIDFromBytes(url.toByteArray()).mostSignificantBits and Long.MAX_VALUE).inv()
 
 fun OnlineTrack.toSong(): Song = Song(
-    id = onlineSongId(videoId),
+    id = onlineSongId(url),
     title = title,
     artist = artist,
-    album = "YouTube",
+    album = sourceNameOf(url),
     albumId = -1L,
     durationMs = durationMs,
     dateAdded = System.currentTimeMillis() / 1000L,
-    uri = Uri.parse("https://youtu.be/$videoId"),
-    remoteId = videoId,
+    uri = Uri.parse(url),
+    remoteId = url,
     artUrl = artUrl
 )
 
 /** The private address the player resolves into a real stream ([video] = picture and sound). */
-fun onlineMediaUri(videoId: String, video: Boolean): Uri =
-    Uri.Builder().scheme(ONLINE_SCHEME).authority("stream").appendPath(videoId)
-        .appendQueryParameter("v", if (video) "1" else "0").build()
+fun onlineMediaUri(url: String, video: Boolean): Uri =
+    Uri.Builder().scheme(ONLINE_SCHEME).authority("stream")
+        .appendQueryParameter("u", url).appendQueryParameter("v", if (video) "1" else "0").build()
+
+/** Search sources shown in the Online tab (same order as [OnlineEngine.search]'s `source`). */
+val OnlineSources = listOf("YouTube", "YT Music", "SoundCloud", "Bandcamp")
+
+fun sourceNameOf(url: String): String = when {
+    url.contains("youtube.com") || url.contains("youtu.be") -> "YouTube"
+    url.contains("soundcloud.com") -> "SoundCloud"
+    url.contains("bandcamp.com") -> "Bandcamp"
+    else -> "Online"
+}
+
+/** Only YouTube has a video to watch. */
+val Song.canWatch: Boolean get() = remoteId?.let { it.contains("youtube.com") || it.contains("youtu.be") } == true
+val Song.sourceName: String get() = remoteId?.let { sourceNameOf(it) } ?: ""
 
 /** Online songs the app has seen (played, queued, favorited ...). Kept on the device. */
 object OnlineRegistry {
@@ -173,39 +187,94 @@ object OnlineEngine {
         }
     }
 
-    /** Blocking: call from a background thread. */
-    fun search(query: String): List<OnlineTrack> {
+    /** Blocking: call from a background thread. [source] = index in [OnlineSources]. */
+    fun search(query: String, source: Int = 0): List<OnlineTrack> {
         ensureInit()
-        val yt = ServiceList.YouTube
-        val handler = yt.searchQHFactory.fromQuery(query, listOf(YoutubeSearchQueryHandlerFactory.VIDEOS), "")
-        val info = SearchInfo.getInfo(yt, handler)
+        val (service, filter) = when (source) {
+            1 -> ServiceList.YouTube to "music_songs"
+            2 -> ServiceList.SoundCloud to "tracks"
+            3 -> ServiceList.Bandcamp to "tracks"
+            else -> ServiceList.YouTube to "videos"
+        }
+        val handler = service.searchQHFactory.fromQuery(query, listOf(filter), "")
+        val info = SearchInfo.getInfo(service, handler)
         return info.relatedItems
             .filterIsInstance<StreamInfoItem>()
             .mapNotNull { item ->
-                val id = Uri.parse(item.url).getQueryParameter("v") ?: return@mapNotNull null
+                val url = item.url ?: return@mapNotNull null
+                val ytId = if (url.contains("youtube.com")) Uri.parse(url).getQueryParameter("v") else null
                 OnlineTrack(
-                    videoId = id,
+                    url = url,
                     title = item.name.orEmpty(),
                     artist = item.uploaderName.orEmpty().removeSuffix(" - Topic"),
                     durationMs = if (item.duration > 0) item.duration * 1000L else 0L,
                     artUrl = item.thumbnails.maxByOrNull { it.height }?.url
-                        ?: "https://i.ytimg.com/vi/$id/mqdefault.jpg"
+                        ?: ytId?.let { "https://i.ytimg.com/vi/$it/mqdefault.jpg" }
                 )
             }
-            .distinctBy { it.videoId }
+            .distinctBy { it.url }
+    }
+
+    private val spotifyRe = Regex("""(?:open\.spotify\.com/(?:intl-[a-zA-Z-]+/)?track/|spotify:track:)([A-Za-z0-9]{22})""")
+
+    /** The track id when [text] is a Spotify track link (or spotify:track: uri), else null. */
+    fun spotifyTrackId(text: String): String? = spotifyRe.find(text)?.groupValues?.get(1)
+
+    private fun httpGet(url: String): String {
+        val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        c.connectTimeout = 15000
+        c.readTimeout = 15000
+        c.setRequestProperty("User-Agent", USER_AGENT)
+        c.setRequestProperty("Accept-Language", "en")
+        return try {
+            if (c.responseCode !in 200..299) throw IOException("HTTP ${c.responseCode}")
+            c.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            c.disconnect()
+        }
+    }
+
+    private fun unescape(s: String): String =
+        android.text.Html.fromHtml(s, android.text.Html.FROM_HTML_MODE_LEGACY).toString().trim()
+
+    /**
+     * Title and artist of a Spotify track, read from its public page (no Spotify account or API key).
+     * Blocking: call from a background thread.
+     */
+    @Throws(IOException::class)
+    fun spotifyInfo(trackId: String): Pair<String, String> {
+        try {
+            val html = httpGet("https://open.spotify.com/track/$trackId")
+            val title = Regex("""<meta property="og:title" content="([^"]*)"""").find(html)?.groupValues?.get(1)
+            val desc = Regex("""<meta property="og:description" content="([^"]*)"""").find(html)?.groupValues?.get(1)
+            if (!title.isNullOrBlank()) {
+                // description looks like:  Artist · Album · Song · 2020   (artist first)
+                val artist = desc?.let { unescape(it).split("·").firstOrNull()?.trim() }.orEmpty()
+                return unescape(title) to artist
+            }
+        } catch (_: Exception) {
+        }
+        // fallback: Spotify's public oEmbed gives the title only
+        try {
+            val json = httpGet("https://open.spotify.com/oembed?url=" + java.net.URLEncoder.encode("https://open.spotify.com/track/$trackId", "UTF-8"))
+            val title = JSONObject(json).optString("title")
+            if (title.isNotBlank()) return title to ""
+        } catch (_: Exception) {
+        }
+        throw IOException("Could not read this Spotify link")
     }
 
     /** Blocking: a playable address for the video (audio only, or picture + sound with [video]). */
     @Throws(IOException::class)
-    fun streamUrl(videoId: String, video: Boolean): String {
-        val key = "$videoId|$video"
+    fun streamUrl(pageUrl: String, video: Boolean): String {
+        val key = "$pageUrl|$video"
         val now = System.currentTimeMillis()
         urlCache[key]?.let { if (it.second > now) return it.first }
         try {
             ensureInit()
-            val info = StreamInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/watch?v=$videoId")
+            val info = StreamInfo.getInfo(pageUrl)
             var url: String? = null
-            if (video) {
+            if (video && pageUrl.contains("youtube.com")) {
                 // a stream that already has sound in it (usually 360p; sometimes 720p)
                 url = info.videoStreams
                     .filter { !it.isVideoOnly && it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
@@ -234,9 +303,9 @@ object OnlineResolver : ResolvingDataSource.Resolver {
     override fun resolveDataSpec(dataSpec: DataSpec): DataSpec {
         val uri = dataSpec.uri
         if (uri.scheme != ONLINE_SCHEME) return dataSpec
-        val id = uri.lastPathSegment ?: throw IOException("Bad online address")
+        val page = uri.getQueryParameter("u") ?: throw IOException("Bad online address")
         val video = uri.getQueryParameter("v") == "1"
-        return dataSpec.withUri(Uri.parse(OnlineEngine.streamUrl(id, video)))
+        return dataSpec.withUri(Uri.parse(OnlineEngine.streamUrl(page, video)))
     }
 }
 

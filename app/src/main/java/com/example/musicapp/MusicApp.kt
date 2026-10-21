@@ -1092,7 +1092,7 @@ fun MusicApp(
                     },
                     hasVideo = hasVideo,
                     videoPlayer = controller,
-                    onToggleVideo = if (song.isOnline) ({ toggleVideo() }) else null,
+                    onToggleVideo = if (song.canWatch) ({ toggleVideo() }) else null,
                     settings = settings,
                     speed = settings.speed,
                     onSpeed = { v ->

@@ -3,7 +3,9 @@ package com.example.musicapp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -113,6 +115,7 @@ fun SearchScreen(
     val context = LocalContext.current
     var filter by remember { mutableIntStateOf(0) }
     var online by remember { mutableStateOf(false) }
+    var source by remember { mutableIntStateOf(0) }
     var recents by remember { mutableStateOf(loadRecentSearches(context)) }
     val results = remember(query, songs, filter) { searchSongsBy(songs, query, filter) }
     val focusRequester = remember { FocusRequester() }
@@ -124,8 +127,14 @@ fun SearchScreen(
     var onlineLoading by remember { mutableStateOf(false) }
     var onlineError by remember { mutableStateOf<String?>(null) }
     var submitTick by remember { mutableIntStateOf(0) }
+    // set when the text in the box is a Spotify link: what that link is (title and artist)
+    var spotifyLabel by remember { mutableStateOf<String?>(null) }
+    // pasting a Spotify track link switches to online search by itself
+    LaunchedEffect(query) {
+        if (OnlineEngine.spotifyTrackId(query) != null) online = true
+    }
     val handledTick = remember { intArrayOf(0) }
-    LaunchedEffect(online, query, submitTick) {
+    LaunchedEffect(online, source, query, submitTick) {
         if (!online) return@LaunchedEffect
         val q = query.trim()
         if (q.length < 2) {
@@ -134,16 +143,28 @@ fun SearchScreen(
             onlineLoading = false
             return@LaunchedEffect
         }
-        if (submitTick == handledTick[0]) delay(700) else handledTick[0] = submitTick
+        val spotifyId = OnlineEngine.spotifyTrackId(q)
+        if (spotifyId == null && submitTick == handledTick[0]) delay(700) else handledTick[0] = submitTick
         onlineLoading = true
         onlineError = null
         try {
-            onlineResults = withContext(Dispatchers.IO) { OnlineEngine.search(q) }
+            onlineResults = withContext(Dispatchers.IO) {
+                if (spotifyId != null) {
+                    // Spotify link: find the song by its name and artist in the chosen source
+                    val (title, artist) = OnlineEngine.spotifyInfo(spotifyId)
+                    spotifyLabel = if (artist.isBlank()) title else "$title — $artist"
+                    OnlineEngine.search("$artist $title".trim(), source)
+                } else {
+                    spotifyLabel = null
+                    OnlineEngine.search(q, source)
+                }
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             onlineResults = emptyList()
-            onlineError = "Online search failed. Check your internet connection."
+            onlineError = if (spotifyId != null) "Could not read this Spotify link. Check your internet connection."
+            else "Online search failed. Check your internet connection."
         }
         onlineLoading = false
     }
@@ -198,7 +219,7 @@ fun SearchScreen(
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (query.isEmpty()) {
                                 Text(
-                                    if (online) "Search songs and videos online" else "Songs, artists, albums",
+                                    if (online) "Search online or paste a Spotify link" else "Songs, artists, albums",
                                     color = p.secondary, fontSize = 17.sp
                                 )
                             }
@@ -235,6 +256,15 @@ fun SearchScreen(
             OptionPill("On this device", !online, p) { online = false }
             OptionPill("Online", online, p) { online = true }
         }
+        if (online) {
+            // which website to search
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OnlineSources.forEachIndexed { i, name -> OptionPill(name, source == i, p) { source = i } }
+            }
+        }
         if (!online) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
@@ -255,7 +285,7 @@ fun SearchScreen(
                     if (recents.isEmpty()) {
                         item {
                             Text(
-                                if (online) "Search YouTube: listen to a song or watch its video."
+                                if (online) "Pick a source (YouTube, YT Music, SoundCloud, Bandcamp) and search."
                                 else "Search your songs, artists and albums.",
                                 Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
                                 color = p.secondary, fontSize = 15.sp
@@ -318,13 +348,14 @@ fun SearchScreen(
                         else -> {
                             item {
                                 Text(
-                                    "${onlineResults.size} results · tap to listen, \"Video\" to watch",
+                                    (spotifyLabel?.let { "Spotify: $it\n" } ?: "") +
+                                        "${onlineResults.size} results from ${OnlineSources[source]} · tap to listen",
                                     fontSize = 13.sp, color = p.secondary,
                                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
                                 )
                             }
-                            itemsIndexed(onlineResults, key = { _, t -> t.videoId }) { _, track ->
-                                val song = remember(track.videoId) { track.toSong() }
+                            itemsIndexed(onlineResults, key = { _, t -> t.url }) { _, track ->
+                                val song = remember(track.url) { track.toSong() }
                                 SongRow(
                                     song = song,
                                     playing = current?.id == song.id,
@@ -340,11 +371,11 @@ fun SearchScreen(
                                     onLong = { onLong(song) },
                                     onPlayNext = { onPlayNext(song) },
                                     onAddToQueue = { onAddToQueue(song) },
-                                    onWatch = {
+                                    onWatch = if (!song.canWatch) null else ({
                                         recents = saveRecentSearch(context, query)
                                         focusManager.clearFocus()
                                         onPlay(song, true)
-                                    }
+                                    })
                                 )
                             }
                         }

@@ -40,7 +40,7 @@ fun shareSongCard(context: Context, song: Song) {
             FileOutputStream(file).use { card.compress(Bitmap.CompressFormat.PNG, 100, it) }
             val uri = FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", file)
             val text = "${song.title} — ${song.artist}" +
-                if (song.remoteId != null) "\nhttps://youtu.be/${song.remoteId}"
+                if (song.remoteId != null) "\n${song.remoteId}"
                 else if (song.album.isNotBlank()) "\n${song.album}" else ""
             Handler(Looper.getMainLooper()).post {
                 try {
