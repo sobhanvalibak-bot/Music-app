@@ -114,7 +114,8 @@ fun SearchScreen(
 ) {
     val context = LocalContext.current
     var filter by remember { mutableIntStateOf(0) }
-    var online by remember { mutableStateOf(false) }
+    // online search is switched off: the search page only looks at the songs on this device
+    val online = false
     var source by remember { mutableIntStateOf(0) }
     var recents by remember { mutableStateOf(loadRecentSearches(context)) }
     val results = remember(query, songs, filter) { searchSongsBy(songs, query, filter) }
@@ -129,10 +130,6 @@ fun SearchScreen(
     var submitTick by remember { mutableIntStateOf(0) }
     // set when the text in the box is a Spotify link: what that link is (title and artist)
     var spotifyLabel by remember { mutableStateOf<String?>(null) }
-    // pasting a Spotify track link switches to online search by itself
-    LaunchedEffect(query) {
-        if (OnlineEngine.spotifyTrackId(query) != null) online = true
-    }
     val handledTick = remember { intArrayOf(0) }
     LaunchedEffect(online, source, query, submitTick) {
         if (!online) return@LaunchedEffect
@@ -249,23 +246,6 @@ fun SearchScreen(
             )
         }
 
-        // where to search: your own songs, or online
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OptionPill("On this device", !online, p) { online = false }
-            OptionPill("Online", online, p) { online = true }
-        }
-        if (online) {
-            // which website to search
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OnlineSources.forEachIndexed { i, name -> OptionPill(name, source == i, p) { source = i } }
-            }
-        }
         if (!online) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
@@ -392,17 +372,6 @@ fun SearchScreen(
                             color = p.secondary, fontSize = 15.sp
                         )
                     }
-                    item {
-                        Row(
-                            Modifier.fillMaxWidth().clickable { online = true }
-                                .padding(horizontal = 20.dp, vertical = 11.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            GlyphIcon(Glyph.Search, p.accent, Modifier.size(16.dp))
-                            Spacer(Modifier.width(12.dp))
-                            Text("Search \"${query.trim()}\" online", fontSize = 16.sp, color = p.accent, maxLines = 1)
-                        }
-                    }
                 }
 
                 else -> {
@@ -430,17 +399,6 @@ fun SearchScreen(
                             onAddToQueue = { onAddToQueue(song) },
                             onEditInfo = { onEditInfo(song) }
                         )
-                    }
-                    item {
-                        Row(
-                            Modifier.fillMaxWidth().clickable { online = true }
-                                .padding(horizontal = 20.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            GlyphIcon(Glyph.Search, p.accent, Modifier.size(16.dp))
-                            Spacer(Modifier.width(12.dp))
-                            Text("Search \"${query.trim()}\" online", fontSize = 16.sp, color = p.accent, maxLines = 1)
-                        }
                     }
                 }
             }

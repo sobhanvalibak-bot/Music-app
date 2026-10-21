@@ -275,7 +275,7 @@ fun GlassTabBar(
 }
 
 /** iOS-like dark glass: translucent fill, light rim on the edge, soft shadow. */
-private fun Modifier.iosGlass(shape: Shape, solid: Color? = null): Modifier =
+internal fun Modifier.iosGlass(shape: Shape, solid: Color? = null): Modifier =
     this
         .shadow(14.dp, shape, ambientColor = Color.Black.copy(alpha = 0.4f), spotColor = Color.Black.copy(alpha = 0.4f))
         .clip(shape)

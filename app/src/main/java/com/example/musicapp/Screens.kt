@@ -306,17 +306,19 @@ fun SongsTab(
     val pullPx = with(density) { 90.dp.toPx() }
     val fadePx = with(density) { 64.dp.toPx() }
     val pull = rememberPullToSearch(pullPx, onOpenSearch)
+    // pulling up past the end of the list opens the search sheet too
+    val pullUp = rememberPullUpToSearch(pullPx, onOpenSearch)
     val titleProg by remember {
         derivedStateOf {
             if (listState.firstVisibleItemIndex > 0) 1f
             else (listState.firstVisibleItemScrollOffset / fadePx).coerceIn(0f, 1f)
         }
     }
-    Box(Modifier.fillMaxSize().nestedScroll(pull.connection)) {
+    Box(Modifier.fillMaxSize().nestedScroll(pull.connection).nestedScroll(pullUp.connection)) {
     PullSearchPill(pull, pullPx, topPad, p)
     LazyColumn(
         state = listState,
-        modifier = Modifier.graphicsLayer { translationY = pull.pull.value },
+        modifier = Modifier.graphicsLayer { translationY = pull.pull.value - pullUp.pull.value },
         contentPadding = PaddingValues(top = topPad, bottom = bottomPad)
     ) {
         item {
@@ -462,6 +464,23 @@ fun SongsTab(
                 onAddToQueue = onAddToQueue?.let { q -> { q(song) } },
                 onEditInfo = { onEditInfo(song) }
             )
+        }
+        // end of the list: pull up from here to search
+        item {
+            val armed = pullUp.pull.value >= pullPx
+            Column(
+                Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                SmsIcon(
+                    SmsIconKind.ChevronUp, if (armed) p.accent else p.secondary,
+                    Modifier.size(20.dp).graphicsLayer { translationY = -pullUp.pull.value * 0.12f }
+                )
+                Text(
+                    if (armed) "Release to search" else "Pull up to search",
+                    color = if (armed) p.accent else p.secondary, fontSize = 12.sp
+                )
+            }
         }
     }
     CollapsingBar("Home", titleProg, p, topPad, Modifier.align(Alignment.TopStart))

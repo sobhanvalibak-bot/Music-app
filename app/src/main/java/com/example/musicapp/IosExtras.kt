@@ -257,6 +257,56 @@ fun rememberPullToSearch(thresholdPx: Float, onTrigger: () -> Unit): PullToSearc
     return remember(pull, connection) { PullToSearchState(pull, connection) }
 }
 
+/**
+ * Pulling the list up while it is already at the very end lifts it with a little resistance.
+ * Letting go past [thresholdPx] calls [onTrigger] (opens the search sheet); otherwise it springs back.
+ * [PullToSearchState.pull] holds how far the list was lifted (positive number).
+ */
+@Composable
+fun rememberPullUpToSearch(thresholdPx: Float, onTrigger: () -> Unit): PullToSearchState {
+    val pull = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val trigger by rememberUpdatedState(onTrigger)
+    val haptic = LocalHapticFeedback.current
+    val connection = remember(thresholdPx) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && pull.value > 0f && available.y > 0f) {
+                    val nv = (pull.value - available.y).coerceAtLeast(0f)
+                    val used = pull.value - nv
+                    scope.launch { pull.snapTo(nv) }
+                    return Offset(0f, used)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && available.y < 0f) {
+                    val nv = (pull.value - available.y * 0.5f).coerceAtMost(thresholdPx * 1.8f)
+                    scope.launch { pull.snapTo(nv) }
+                    return Offset(0f, available.y)
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (pull.value > 0f) {
+                    if (pull.value >= thresholdPx) trigger()
+                    pull.animateTo(0f, spring(dampingRatio = 0.75f, stiffness = 380f))
+                    return available
+                }
+                return Velocity.Zero
+            }
+        }
+    }
+    LaunchedEffect(pull, thresholdPx) {
+        snapshotFlow { pull.value >= thresholdPx }.collect {
+            if (it) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+    }
+    return remember(pull, connection) { PullToSearchState(pull, connection) }
+}
+
 /** The search pill that is revealed behind the list while it is pulled down. */
 @Composable
 fun PullSearchPill(state: PullToSearchState, thresholdPx: Float, topPad: Dp, p: Palette) {

@@ -234,8 +234,12 @@ fun MusicApp(
     var barsVisible by remember { mutableStateOf(true) }
     var searching by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
+    // the Misc page (SMS) and whether one of its chats is open (then it covers the tab bar)
+    var misc by remember { mutableStateOf(false) }
+    var miscThread by remember { mutableStateOf(false) }
 
     BackHandler(enabled = searching) { searching = false }
+    BackHandler(enabled = misc && !miscThread && !searching) { misc = false }
     BackHandler(enabled = tab == 3 && sub != Sub.None) { sub = Sub.None }
     BackHandler(enabled = artistPage != null) { artistPage = null }
     BackHandler(enabled = showPlayer) { showPlayer = false }
@@ -892,8 +896,25 @@ fun MusicApp(
             }
         }
 
-        // Search page
-        if (searching) {
+        // Misc page: SMS inbox and chats. A chat covers everything, the inbox sits under the bars.
+        if (misc) {
+            Box(Modifier.fillMaxSize().zIndex(if (miscThread) 1f else 0f)) {
+                SmsMiscScreen(
+                    p = p,
+                    topPad = topPad,
+                    bottomPad = bottomPad,
+                    onThreadOpen = { miscThread = it }
+                )
+            }
+        }
+
+        // Search page: rises from the bottom like an iOS sheet
+        AnimatedVisibility(
+            visible = searching,
+            modifier = Modifier.fillMaxSize(),
+            enter = slideInVertically(spring(dampingRatio = 0.85f, stiffness = 380f)) { it } + fadeIn(tween(160)),
+            exit = slideOutVertically(tween(220)) { it } + fadeOut(tween(180))
+        ) {
             SearchScreen(
                 songs = songs,
                 current = current,
@@ -956,9 +977,10 @@ fun MusicApp(
             ) {
                 GlassTabBar(
                     modifier = Modifier.weight(1f),
-                    selected = if (searching) -1 else tab,
+                    selected = if (searching || misc) -1 else tab,
                     onSelect = {
                         searching = false
+                        misc = false
                         sub = Sub.None
                         artistPage = null
                         barsVisible = true
@@ -968,12 +990,13 @@ fun MusicApp(
                     photo = profile.photo,
                     profileName = profile.name
                 )
-                SearchButton(
-                    active = searching,
+                MiscButton(
+                    active = misc,
                     p = p,
                     onClick = {
                         barsVisible = true
-                        searching = true
+                        searching = false
+                        misc = true
                     }
                 )
             }
