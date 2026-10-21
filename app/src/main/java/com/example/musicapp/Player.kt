@@ -118,7 +118,11 @@ fun FullPlayer(
     sleepActive: Boolean = false,
     sleepEndOfSong: Boolean = false,
     sleepLeftMs: Long = 0L,
-    onSleepPick: (Int) -> Unit = {}
+    onSleepPick: (Int) -> Unit = {},
+    /** Online songs: the picture is showing, the player that draws it, and the audio/video switch. */
+    hasVideo: Boolean = false,
+    videoPlayer: Player? = null,
+    onToggleVideo: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     var showSleep by remember { mutableStateOf(false) }
@@ -218,11 +222,11 @@ fun FullPlayer(
                     Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(10.dp))
-                        .clickable { showAlbum = true }
+                        .clickable(enabled = !song.isOnline) { showAlbum = true }
                         .padding(vertical = 2.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text("Playing from Album", fontSize = 12.sp, color = sub, maxLines = 1)
+                    Text(if (song.isOnline) "Playing from YouTube" else "Playing from Album", fontSize = 12.sp, color = sub, maxLines = 1)
                     Text(
                         song.album.ifBlank { song.title }, fontSize = 15.sp, fontWeight = FontWeight.Bold,
                         color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis
@@ -236,6 +240,16 @@ fun FullPlayer(
                 Modifier.weight(1f).fillMaxWidth().padding(horizontal = 22.dp, vertical = 14.dp),
                 contentAlignment = Alignment.Center
             ) {
+              if (hasVideo && videoPlayer != null) {
+                VideoSurface(
+                    videoPlayer,
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.Black)
+                )
+              } else {
                 Cover(
                     song,
                     Modifier
@@ -260,6 +274,23 @@ fun FullPlayer(
                         },
                     16.dp, p, 1600
                 )
+              }
+                if (onToggleVideo != null) {
+                    // online songs: switch between sound only and the video
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.Black.copy(alpha = 0.45f))
+                            .clickable { onToggleVideo() }
+                            .padding(horizontal = 16.dp, vertical = 7.dp)
+                    ) {
+                        Text(
+                            if (hasVideo) "Audio only" else "Watch video",
+                            color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
             }
 
             // ── Current lyric line (like Spotify) ──

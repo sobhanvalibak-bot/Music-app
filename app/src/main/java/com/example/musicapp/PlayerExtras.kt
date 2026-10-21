@@ -428,7 +428,7 @@ fun PlaybackOptionsPanel(
 ) {
     val context = LocalContext.current
     var bitDepth by remember(song.id) { mutableIntStateOf(0) }
-    LaunchedEffect(song.id) { bitDepth = bitDepthOf(context, song.uri) }
+    LaunchedEffect(song.id) { bitDepth = if (song.isOnline) 0 else bitDepthOf(context, song.uri) }
 
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(Unit) {

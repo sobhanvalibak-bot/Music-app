@@ -69,10 +69,19 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
+/** Lets the song menus open the sleep timer sheet that lives in MusicApp. */
+object SleepMenuBridge {
+    var open: (() -> Unit)? = null
+    var active: Boolean = false
+    var label: String = "Sleep timer"
+}
+
 /** Opens the system share sheet with the song's title, artist and album. */
 fun shareSong(context: Context, song: Song) {
     try {
-        val shareText = "${song.title} — ${song.artist}" + if (song.album.isNotBlank()) "\n${song.album}" else ""
+        val shareText = "${song.title} — ${song.artist}" +
+            if (song.remoteId != null) "\nhttps://youtu.be/${song.remoteId}"
+            else if (song.album.isNotBlank()) "\n${song.album}" else ""
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_SUBJECT, song.title)
@@ -273,7 +282,9 @@ fun SongActionSheet(
     onAddToPlaylist: (() -> Unit)?,
     onEditInfo: (() -> Unit)?,
     onRemove: (() -> Unit)?,
-    anchor: Rect? = null
+    anchor: Rect? = null,
+    onAddToQueue: (() -> Unit)? = null,
+    onWatch: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val red = Color(0xFFFF3B30)
@@ -303,7 +314,9 @@ fun SongActionSheet(
         buildGroups = { close ->
             listOf(
                 buildList<MenuAction> {
+                    if (onWatch != null) add(MenuAction("Watch video", Glyph.Play) { close { onWatch() } })
                     if (onPlayNext != null) add(MenuAction("Play next", Glyph.Next) { close { onPlayNext() } })
+                    if (onAddToQueue != null) add(MenuAction("Add to queue", Glyph.Queue) { close { onAddToQueue() } })
                     if (onAddToPlaylist != null) add(MenuAction("Add to playlist", Glyph.PlusCircle) { close { onAddToPlaylist() } })
                     add(
                         MenuAction(
@@ -315,6 +328,16 @@ fun SongActionSheet(
                 buildList<MenuAction> {
                     if (onEditInfo != null) add(MenuAction("Edit info", Glyph.Edit) { close { onEditInfo() } })
                     add(MenuAction("Share", Glyph.Share) { close { shareSong(context, song) } })
+                },
+                buildList<MenuAction> {
+                    SleepMenuBridge.open?.let { open ->
+                        add(
+                            MenuAction(
+                                SleepMenuBridge.label, Glyph.Moon,
+                                if (SleepMenuBridge.active) Color(0xFF0A84FF) else null
+                            ) { close { open() } }
+                        )
+                    }
                 },
                 buildList<MenuAction> {
                     if (onRemove != null) add(MenuAction("Remove from this list", Glyph.Close, red) { close { onRemove() } })

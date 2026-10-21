@@ -152,7 +152,7 @@ object MusicWidget {
         if (custom.exists()) {
             BitmapFactory.decodeFile(custom.absolutePath)?.let { return it }
         }
-        if (songUri != null) {
+        if (songUri != null && songUri.scheme != ONLINE_SCHEME) {
             try {
                 val r = MediaMetadataRetriever()
                 try {
@@ -172,6 +172,21 @@ object MusicWidget {
                 } catch (e: Exception) {
                 }
             }
+        }
+        if (artUri != null && (artUri.scheme == "http" || artUri.scheme == "https")) {
+            // online song: its thumbnail
+            try {
+                val c = java.net.URL(artUri.toString()).openConnection() as java.net.HttpURLConnection
+                c.connectTimeout = 10000
+                c.readTimeout = 10000
+                try {
+                    c.inputStream.use { BitmapFactory.decodeStream(it)?.let { b -> return b } }
+                } finally {
+                    c.disconnect()
+                }
+            } catch (e: Exception) {
+            }
+            return null
         }
         if (artUri != null) {
             try {

@@ -11,7 +11,12 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import kotlin.math.PI
@@ -31,7 +36,20 @@ const val ACTION_OPEN_PLAYER = "com.example.musicapp.OPEN_PLAYER"
  *  - Publishes the audio session so the system equalizer can attach to it.
  * Gapless playback between songs is built into ExoPlayer.
  */
+@OptIn(UnstableApi::class)
 class PlaybackService : MediaSessionService() {
+
+    /** Local files as usual; online songs (npyt://...) get their stream address resolved just in time. */
+    private val mediaSourceFactory by lazy {
+        val http = DefaultHttpDataSource.Factory()
+            .setUserAgent(OnlineEngine.USER_AGENT)
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(20_000)
+        DefaultMediaSourceFactory(
+            ResolvingDataSource.Factory(DefaultDataSource.Factory(this, http), OnlineResolver)
+        )
+    }
 
     private var session: MediaSession? = null
     private var player: ExoPlayer? = null
@@ -57,6 +75,7 @@ class PlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         val p = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -167,6 +186,7 @@ class PlaybackService : MediaSessionService() {
 
     private fun ensureTail(p: ExoPlayer): ExoPlayer {
         val t = tail ?: ExoPlayer.Builder(this)
+            .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)

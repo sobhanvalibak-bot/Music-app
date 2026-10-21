@@ -60,7 +60,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.Tracks
@@ -272,7 +274,9 @@ fun MusicApp(
     }
 
     val songs = remember(songsVersion) { loadSongs(context) }
-    val byId = remember(songs) { songs.associateBy { it.id } }
+    remember { OnlineRegistry.init(context) } // online songs saved earlier (favorites, playlists, recent)
+    // songs on the device plus the online songs the app has seen
+    val byId: Map<Long, Song> = remember(songs) { SongIndex(songs.associateBy { it.id }) }
     val sorted = remember(songs, settings.sort) {
         when (settings.sort) {
             1 -> songs.sortedBy { it.dateAdded }
@@ -311,6 +315,8 @@ fun MusicApp(
     var audioInfo by remember { mutableStateOf<AudioInfo?>(null) }
     var queue by remember { mutableStateOf<List<QueueEntry>>(emptyList()) }
     var currentWindow by remember { mutableIntStateOf(-1) }
+    // true while the current (online) song is playing with its picture
+    var hasVideo by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
@@ -338,10 +344,21 @@ fun MusicApp(
             repeatMode = c.repeatMode
             current = c.currentMediaItem?.mediaId?.toLongOrNull()?.let { byId[it] }
             audioInfo = audioInfoFrom(c.currentTracks)
+            hasVideo = c.currentTracks.isTypeSelected(C.TRACK_TYPE_VIDEO)
             queue = buildQueue(c, byId)
             currentWindow = c.currentMediaItemIndex
             val listener = object : Player.Listener {
-                override fun onTracksChanged(tracks: Tracks) { audioInfo = audioInfoFrom(tracks) }
+                override fun onTracksChanged(tracks: Tracks) {
+                    audioInfo = audioInfoFrom(tracks)
+                    hasVideo = tracks.isTypeSelected(C.TRACK_TYPE_VIDEO)
+                }
+                override fun onPlayerError(error: PlaybackException) {
+                    // an online song that cannot be loaded (no internet, removed video ...): say so and go on
+                    if (current?.isOnline == true) {
+                        Toast.makeText(context, "Could not play this online song", Toast.LENGTH_SHORT).show()
+                        if (c.hasNextMediaItem()) { c.seekToNextMediaItem(); c.prepare(); c.play() }
+                    }
+                }
                 override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
                 override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
                     shuffle = shuffleModeEnabled
@@ -374,11 +391,53 @@ fun MusicApp(
         c.play()
     }
 
+    /**
+     * Plays just this song right now, without turning the album / artist / playlist it was tapped in
+     * into the queue: it goes in right after the current song, and the queue you already had carries on after it.
+     * Only the "Play" / "Shuffle" buttons of a page (and the album's own play menu) queue the whole page.
+     */
+    fun playOne(song: Song, video: Boolean = false) {
+        val c = controller ?: return
+        OnlineRegistry.remember(song)
+        val item = song.toMediaItem(video)
+        if (c.mediaItemCount == 0) {
+            c.setMediaItem(item)
+        } else {
+            val at = (c.currentMediaItemIndex + 1).coerceIn(0, c.mediaItemCount)
+            c.addMediaItem(at, item)
+            c.seekTo(at, 0L)
+        }
+        c.prepare()
+        c.play()
+    }
+
     fun queueNext(song: Song) {
         val c = controller ?: return
+        if (c.mediaItemCount == 0) { playOne(song); return }
+        OnlineRegistry.remember(song)
         val insertAt = (c.currentMediaItemIndex + 1).coerceAtLeast(0)
         c.addMediaItem(insertAt, song.toMediaItem())
         Toast.makeText(context, "Will play next: ${song.title}", Toast.LENGTH_SHORT).show()
+    }
+
+    // At the very end of the queue.
+    fun queueEnd(song: Song) {
+        val c = controller ?: return
+        if (c.mediaItemCount == 0) { playOne(song); return }
+        OnlineRegistry.remember(song)
+        c.addMediaItem(song.toMediaItem())
+        Toast.makeText(context, "Added to queue: ${song.title}", Toast.LENGTH_SHORT).show()
+    }
+
+    // Online song: switch between sound only and picture + sound, keeping the position.
+    fun toggleVideo() {
+        val c = controller ?: return
+        val song = current ?: return
+        if (!song.isOnline) return
+        val idx = c.currentMediaItemIndex
+        val pos = c.currentPosition
+        c.replaceMediaItem(idx, song.toMediaItem(!hasVideo))
+        c.seekTo(idx, pos)
     }
 
     // Whole list goes right after the current song.
@@ -564,7 +623,7 @@ fun MusicApp(
                         onFavorites = { sub = Sub.Favorites },
                         onOpenPlaylist = { sub = Sub.PlaylistPage(it) },
                         onNewPlaylist = { showNewPlaylist = true },
-                        onPlayFavorites = { list, i -> playQueue(list, i) },
+                        onPlayFavorites = { list, i -> list.getOrNull(i)?.let { playOne(it) } },
                         onPlayList = { playQueue(it, 0) },
                         onPlayNextList = { queueNextAll(it) },
                         onShuffleList = { playQueue(it.shuffled(), 0) },
@@ -597,11 +656,14 @@ fun MusicApp(
                             topPad = topPad,
                             bottomPad = bottomPad,
                             onBack = { sub = Sub.None },
-                            onPlay = { i -> playQueue(favSongs, i) },
+                            onPlay = { i -> favSongs.getOrNull(i)?.let { playOne(it) } },
+                            onPlayAll = { playQueue(favSongs, 0) },
+                            onShuffleAll = { playQueue(favSongs.shuffled(), 0) },
                             onToggleFav = { favWithHaptic(it.id) },
                             onLong = { addTarget = it },
                             onRemove = null,
                             onPlayNext = { queueNext(it) },
+                            onAddToQueue = { queueEnd(it) },
                             onEditInfo = { editTarget = it }
                         )
                         }
@@ -621,7 +683,8 @@ fun MusicApp(
                                 topPad = topPad,
                                 bottomPad = bottomPad,
                                 onBack = { sub = Sub.None },
-                                onPlay = { i -> playQueue(plSongs, i) },
+                                onPlay = { i -> plSongs.getOrNull(i)?.let { playOne(it) } },
+                                onPlayAll = { playQueue(plSongs, 0) },
                                 onToggleFav = { favWithHaptic(it.id) },
                                 onRemove = { profile.removeFromPlaylist(pl.id, it.id) },
                                 onPlayNext = { queueNextAll(plSongs) },
@@ -655,6 +718,7 @@ fun MusicApp(
                     onToggleFav = { favWithHaptic(it.id) },
                     onLong = { addTarget = it },
                     onPlayNext = { queueNext(it) },
+                    onAddToQueue = { queueEnd(it) },
                     onEditInfo = { editTarget = it },
                     showIndex = settings.sort == 2,
                     onOpenSearch = { searching = true }
@@ -686,10 +750,13 @@ fun MusicApp(
                     songs = list, current = current, favSet = favSet, p = p,
                     showDuration = showDuration, topPad = topPad, bottomPad = bottomPad,
                     onBack = { albumPage = null },
-                    onPlay = { i -> playQueue(list, i) },
+                    onPlay = { i -> list.getOrNull(i)?.let { playOne(it) } },
+                    onPlayAll = { playQueue(list, 0) },
+                    onShuffleAll = { playQueue(list.shuffled(), 0) },
                     onToggleFav = { favWithHaptic(it.id) },
                     onLong = { addTarget = it }, onRemove = null, backLabel = "Albums",
-                    onPlayNext = { queueNext(it) }, onEditInfo = { editTarget = it }
+                    onPlayNext = { queueNext(it) }, onAddToQueue = { queueEnd(it) },
+                    onEditInfo = { editTarget = it }
                 )
             }
         }
@@ -718,12 +785,15 @@ fun MusicApp(
                     topPad = topPad,
                     bottomPad = bottomPad,
                     onBack = { artistPage = null },
-                    onPlay = { i -> playQueue(list, i) },
+                    onPlay = { i -> list.getOrNull(i)?.let { playOne(it) } },
+                    onPlayAll = { playQueue(list, 0) },
+                    onShuffleAll = { playQueue(list.shuffled(), 0) },
                     onToggleFav = { favWithHaptic(it.id) },
                     onLong = { addTarget = it },
                     onRemove = null,
                     backLabel = "Back",
                     onPlayNext = { queueNext(it) },
+                    onAddToQueue = { queueEnd(it) },
                     onEditInfo = { editTarget = it }
                 )
             }
@@ -742,9 +812,16 @@ fun MusicApp(
                 topPad = topPad,
                 bottomPad = bottomPad,
                 onClose = { searching = false },
-                onPlay = { list, i -> playQueue(list, i) },
-                onToggleFav = { favWithHaptic(it.id) },
-                onLong = { addTarget = it }
+                onPlay = { song, video ->
+                    // a search result is a single pick, not a playlist
+                    playOne(song, video)
+                    if (video) showPlayer = true
+                },
+                onPlayNext = { queueNext(it) },
+                onAddToQueue = { queueEnd(it) },
+                onEditInfo = { editTarget = it },
+                onToggleFav = { OnlineRegistry.remember(it); favWithHaptic(it.id) },
+                onLong = { OnlineRegistry.remember(it); addTarget = it }
             )
         }
 
@@ -925,7 +1002,7 @@ fun MusicApp(
                                     MenuAction("Add to playlist", Glyph.PlusCircle) { addTarget = menuSong; islandMenu = false }
                                 ),
                                 listOf(
-                                    MenuAction("Edit info", Glyph.Edit) { editTarget = menuSong; islandMenu = false },
+                                    MenuAction("Edit info", Glyph.Edit) { if (!menuSong.isOnline) editTarget = menuSong; islandMenu = false },
                                     MenuAction("Share", Glyph.Share) {
                                         islandMenu = false
                                         shareSong(context, menuSong)
@@ -1008,8 +1085,14 @@ fun MusicApp(
                         artistPage = name
                     },
                     albumSongs = albumSongs,
-                    onPlayAlbumSong = { i -> playQueue(albumSongs, i) },
-                    onEdit = { editTarget = song },
+                    onPlayAlbumSong = { i -> albumSongs.getOrNull(i)?.let { playOne(it) } },
+                    onEdit = {
+                        if (song.isOnline) Toast.makeText(context, "Online songs have no file to edit", Toast.LENGTH_SHORT).show()
+                        else editTarget = song
+                    },
+                    hasVideo = hasVideo,
+                    videoPlayer = controller,
+                    onToggleVideo = if (song.isOnline) ({ toggleVideo() }) else null,
                     settings = settings,
                     speed = settings.speed,
                     onSpeed = { v ->
@@ -1049,6 +1132,18 @@ fun MusicApp(
         }
     }
 
+    // song menus (long-press / three dots) get a "Sleep timer" entry that opens this sheet
+    SideEffect {
+        SleepMenuBridge.open = { showIslandSleep = true }
+        SleepMenuBridge.active = sleepEndAt != null || sleepEndOfSong
+        SleepMenuBridge.label = when {
+            sleepEndOfSong -> "Sleep timer · end of song"
+            sleepEndAt != null -> "Sleep timer · ${formatTime(sleepLeftMs)}"
+            else -> "Sleep timer"
+        }
+    }
+    DisposableEffect(Unit) { onDispose { SleepMenuBridge.open = null } }
+
     if (showIslandSleep) {
         SleepTimerSheet(
             active = sleepEndAt != null,
@@ -1081,7 +1176,7 @@ fun MusicApp(
             }
         )
     }
-    editTarget?.let { song ->
+    editTarget?.takeIf { !it.isOnline }?.let { song ->
         EditSongDialog(
             song = song,
             p = p,

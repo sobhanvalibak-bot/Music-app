@@ -132,6 +132,8 @@ fun SongRow(
     onRemove: (() -> Unit)? = null,
     onPlayNext: (() -> Unit)? = null,
     onEditInfo: (() -> Unit)? = null,
+    onAddToQueue: (() -> Unit)? = null,
+    onWatch: (() -> Unit)? = null,
     dragModifier: Modifier? = null
 ) {
     var sheetOpen by remember(song.id) { mutableStateOf(false) }
@@ -203,6 +205,17 @@ fun SongRow(
             Spacer(Modifier.width(8.dp))
             Text(formatTime(song.durationMs), fontSize = 13.sp, color = p.secondary)
         }
+        if (onWatch != null) {
+            // online songs: watch the video instead of only listening
+            Spacer(Modifier.width(6.dp))
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(p.accent.copy(alpha = 0.16f))
+                    .clickable { onWatch() }
+                    .padding(horizontal = 9.dp, vertical = 5.dp)
+            ) { Text("Video", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = p.accent) }
+        }
         Box {
             IconButton(onClick = { openMenu() }, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Default.MoreVert, contentDescription = "Song options", tint = p.secondary)
@@ -215,8 +228,10 @@ fun SongRow(
                     onDismiss = { sheetOpen = false },
                     onFav = onFav,
                     onPlayNext = onPlayNext,
+                    onAddToQueue = onAddToQueue,
+                    onWatch = onWatch,
                     onAddToPlaylist = onLong,
-                    onEditInfo = onEditInfo,
+                    onEditInfo = if (song.isOnline) null else onEditInfo,
                     onRemove = onRemove,
                     anchor = anchor
                 )
@@ -259,6 +274,7 @@ fun SongsTab(
     onToggleFav: (Song) -> Unit,
     onLong: (Song) -> Unit,
     onPlayNext: (Song) -> Unit = {},
+    onAddToQueue: ((Song) -> Unit)? = null,
     onEditInfo: (Song) -> Unit = {},
     showIndex: Boolean = false,
     onOpenSearch: () -> Unit = {}
@@ -422,6 +438,7 @@ fun SongsTab(
                 onFav = { onToggleFav(song) },
                 onLong = { onLong(song) },
                 onPlayNext = { onPlayNext(song) },
+                onAddToQueue = onAddToQueue?.let { q -> { q(song) } },
                 onEditInfo = { onEditInfo(song) }
             )
         }
@@ -459,8 +476,12 @@ fun SongListPage(
     onRemove: ((Song) -> Unit)?,
     backLabel: String = "Profile",
     onPlayNext: (Song) -> Unit = {},
+    onAddToQueue: ((Song) -> Unit)? = null,
     onEditInfo: (Song) -> Unit = {},
-    stretchHeader: Boolean = false
+    stretchHeader: Boolean = false,
+    /** Play / Shuffle buttons under the title. Rows play only the song you tap; these play the whole list. */
+    onPlayAll: (() -> Unit)? = null,
+    onShuffleAll: (() -> Unit)? = null
 ) {
     val stretch = rememberStretchState()
     LazyColumn(
@@ -489,6 +510,37 @@ fun SongListPage(
             }
         }
         item { LargeTitle(title, subtitle, p) }
+        if (songs.isNotEmpty() && (onPlayAll != null || onShuffleAll != null)) {
+            item {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (onPlayAll != null) {
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(50))
+                                .background(p.accent)
+                                .clickable { onPlayAll() }
+                                .padding(vertical = 11.dp),
+                            contentAlignment = Alignment.Center
+                        ) { Text("Play", color = Color.White, fontWeight = FontWeight.SemiBold) }
+                    }
+                    if (onShuffleAll != null) {
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(50))
+                                .background(p.selectedPill)
+                                .clickable { onShuffleAll() }
+                                .padding(vertical = 11.dp),
+                            contentAlignment = Alignment.Center
+                        ) { Text("Shuffle", color = p.text, fontWeight = FontWeight.Medium) }
+                    }
+                }
+            }
+        }
         if (songs.isEmpty()) {
             item {
                 Text(
@@ -510,6 +562,7 @@ fun SongListPage(
                 onLong = { onLong(song) },
                 onRemove = onRemove?.let { r -> { r(song) } },
                 onPlayNext = { onPlayNext(song) },
+                onAddToQueue = onAddToQueue?.let { q -> { q(song) } },
                 onEditInfo = { onEditInfo(song) }
             )
         }
@@ -544,6 +597,7 @@ fun PlaylistPage(
     bottomPad: Dp,
     onBack: () -> Unit,
     onPlay: (Int) -> Unit,
+    onPlayAll: () -> Unit,
     onToggleFav: (Song) -> Unit,
     onRemove: (Song) -> Unit,
     onPlayNext: () -> Unit,
@@ -595,7 +649,7 @@ fun PlaylistPage(
                         Modifier
                             .clip(RoundedCornerShape(50))
                             .background(p.accent)
-                            .clickable { onPlay(0) }
+                            .clickable { onPlayAll() }
                             .padding(horizontal = 32.dp, vertical = 11.dp)
                     ) { Text("Play", color = Color.White, fontWeight = FontWeight.SemiBold) }
                     Box(

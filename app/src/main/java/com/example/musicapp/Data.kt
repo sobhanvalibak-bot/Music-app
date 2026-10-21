@@ -41,7 +41,11 @@ data class Song(
     /** Artist names split on ',', '&' and '_' so every artist gets their own page. */
     val artists: List<String> = splitArtists(artist),
     /** Track number from the file's tag (disc * 1000 + track on some files), 0 if unknown. */
-    val track: Int = 0
+    val track: Int = 0,
+    /** YouTube video id when this is an online song (see Online.kt), null for songs on the device. */
+    val remoteId: String? = null,
+    /** Cover picture address of an online song. */
+    val artUrl: String? = null
 )
 
 fun splitArtists(raw: String): List<String> =
@@ -55,20 +59,25 @@ class ArtistGroup(val name: String, val songs: List<Song>)
 
 val albumArtBase: Uri = Uri.parse("content://media/external/audio/albumart")
 
-fun Song.toMediaItem(): MediaItem =
-    MediaItem.Builder()
+/** [video] only matters for online songs: true = picture and sound, false = sound only. */
+fun Song.toMediaItem(video: Boolean = false): MediaItem {
+    val remote = remoteId
+    val playUri = if (remote != null) onlineMediaUri(remote, video) else uri
+    val art = if (remote != null) artUrl?.let { Uri.parse(it) } else ContentUris.withAppendedId(albumArtBase, albumId)
+    return MediaItem.Builder()
         .setMediaId(id.toString())
-        .setUri(uri)
+        .setUri(playUri)
         .setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(title)
                 .setArtist(artist)
                 .setAlbumTitle(album)
-                .setArtworkUri(ContentUris.withAppendedId(albumArtBase, albumId))
+                .setArtworkUri(art)
                 .build()
         )
-        .setRequestMetadata(MediaItem.RequestMetadata.Builder().setMediaUri(uri).build())
+        .setRequestMetadata(MediaItem.RequestMetadata.Builder().setMediaUri(playUri).build())
         .build()
+}
 
 fun loadSongs(context: Context): List<Song> {
     val songs = mutableListOf<Song>()

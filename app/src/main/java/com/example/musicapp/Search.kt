@@ -30,6 +30,10 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 // ───────────────────────── Search ─────────────────────────
 
@@ -98,17 +102,51 @@ fun SearchScreen(
     topPad: Dp,
     bottomPad: Dp,
     onClose: () -> Unit,
-    onPlay: (List<Song>, Int) -> Unit,
+    /** Plays just this song (second value: with the video, online songs only). Never queues the whole result list. */
+    onPlay: (Song, Boolean) -> Unit,
+    onPlayNext: (Song) -> Unit,
+    onAddToQueue: (Song) -> Unit,
+    onEditInfo: (Song) -> Unit,
     onToggleFav: (Song) -> Unit,
     onLong: (Song) -> Unit
 ) {
     val context = LocalContext.current
     var filter by remember { mutableIntStateOf(0) }
+    var online by remember { mutableStateOf(false) }
     var recents by remember { mutableStateOf(loadRecentSearches(context)) }
     val results = remember(query, songs, filter) { searchSongsBy(songs, query, filter) }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
+
+    // ── online search (YouTube): runs a moment after you stop typing, or at once on the keyboard's search key ──
+    var onlineResults by remember { mutableStateOf<List<OnlineTrack>>(emptyList()) }
+    var onlineLoading by remember { mutableStateOf(false) }
+    var onlineError by remember { mutableStateOf<String?>(null) }
+    var submitTick by remember { mutableIntStateOf(0) }
+    val handledTick = remember { intArrayOf(0) }
+    LaunchedEffect(online, query, submitTick) {
+        if (!online) return@LaunchedEffect
+        val q = query.trim()
+        if (q.length < 2) {
+            onlineResults = emptyList()
+            onlineError = null
+            onlineLoading = false
+            return@LaunchedEffect
+        }
+        if (submitTick == handledTick[0]) delay(700) else handledTick[0] = submitTick
+        onlineLoading = true
+        onlineError = null
+        try {
+            onlineResults = withContext(Dispatchers.IO) { OnlineEngine.search(q) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            onlineResults = emptyList()
+            onlineError = "Online search failed. Check your internet connection."
+        }
+        onlineLoading = false
+    }
 
     LaunchedEffect(Unit) {
         try {
@@ -150,12 +188,19 @@ fun SearchScreen(
                     textStyle = TextStyle(color = p.text, fontSize = 17.sp),
                     cursorBrush = SolidColor(p.accent),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { recents = saveRecentSearch(context, query); focusManager.clearFocus() }),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        recents = saveRecentSearch(context, query)
+                        if (online) submitTick++
+                        focusManager.clearFocus()
+                    }),
                     modifier = Modifier.weight(1f).focusRequester(focusRequester),
                     decorationBox = { inner ->
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (query.isEmpty()) {
-                                Text("Songs, artists, albums", color = p.secondary, fontSize = 17.sp)
+                                Text(
+                                    if (online) "Search songs and videos online" else "Songs, artists, albums",
+                                    color = p.secondary, fontSize = 17.sp
+                                )
                             }
                             inner()
                         }
@@ -182,12 +227,22 @@ fun SearchScreen(
             )
         }
 
+        // where to search: your own songs, or online
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            listOf("All", "Songs", "Artists", "Albums").forEachIndexed { i, label ->
-                OptionPill(label, filter == i, p) { filter = i }
+            OptionPill("On this device", !online, p) { online = false }
+            OptionPill("Online", online, p) { online = true }
+        }
+        if (!online) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf("All", "Songs", "Artists", "Albums").forEachIndexed { i, label ->
+                    OptionPill(label, filter == i, p) { filter = i }
+                }
             }
         }
 
@@ -200,7 +255,8 @@ fun SearchScreen(
                     if (recents.isEmpty()) {
                         item {
                             Text(
-                                "Search your songs, artists and albums.",
+                                if (online) "Search YouTube: listen to a song or watch its video."
+                                else "Search your songs, artists and albums.",
                                 Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
                                 color = p.secondary, fontSize = 15.sp
                             )
@@ -234,13 +290,88 @@ fun SearchScreen(
                         }
                     }
                 }
-                results.isEmpty() -> item {
-                    Text(
-                        "No results for \"${query.trim()}\"",
-                        Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                        color = p.secondary, fontSize = 15.sp
-                    )
+
+                online -> {
+                    when {
+                        onlineLoading && onlineResults.isEmpty() -> item {
+                            Text(
+                                "Searching online…",
+                                Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                                color = p.secondary, fontSize = 15.sp
+                            )
+                        }
+                        onlineError != null -> item {
+                            Text(
+                                onlineError.orEmpty(),
+                                Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                                color = p.secondary, fontSize = 15.sp
+                            )
+                        }
+                        onlineResults.isEmpty() -> item {
+                            Text(
+                                if (query.trim().length < 2) "Type at least 2 letters."
+                                else "No online results for \"${query.trim()}\"",
+                                Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                                color = p.secondary, fontSize = 15.sp
+                            )
+                        }
+                        else -> {
+                            item {
+                                Text(
+                                    "${onlineResults.size} results · tap to listen, \"Video\" to watch",
+                                    fontSize = 13.sp, color = p.secondary,
+                                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                                )
+                            }
+                            itemsIndexed(onlineResults, key = { _, t -> t.videoId }) { _, track ->
+                                val song = remember(track.videoId) { track.toSong() }
+                                SongRow(
+                                    song = song,
+                                    playing = current?.id == song.id,
+                                    p = p,
+                                    showDuration = showDuration,
+                                    fav = favSet.contains(song.id),
+                                    onClick = {
+                                        recents = saveRecentSearch(context, query)
+                                        focusManager.clearFocus()
+                                        onPlay(song, false)
+                                    },
+                                    onFav = { onToggleFav(song) },
+                                    onLong = { onLong(song) },
+                                    onPlayNext = { onPlayNext(song) },
+                                    onAddToQueue = { onAddToQueue(song) },
+                                    onWatch = {
+                                        recents = saveRecentSearch(context, query)
+                                        focusManager.clearFocus()
+                                        onPlay(song, true)
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
+
+                results.isEmpty() -> {
+                    item {
+                        Text(
+                            "No results for \"${query.trim()}\"",
+                            Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                            color = p.secondary, fontSize = 15.sp
+                        )
+                    }
+                    item {
+                        Row(
+                            Modifier.fillMaxWidth().clickable { online = true }
+                                .padding(horizontal = 20.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            GlyphIcon(Glyph.Search, p.accent, Modifier.size(16.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Text("Search \"${query.trim()}\" online", fontSize = 16.sp, color = p.accent, maxLines = 1)
+                        }
+                    }
+                }
+
                 else -> {
                     item {
                         Text(
@@ -248,7 +379,7 @@ fun SearchScreen(
                             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
                         )
                     }
-                    itemsIndexed(results, key = { _, s -> s.id }) { index, song ->
+                    itemsIndexed(results, key = { _, s -> s.id }) { _, song ->
                         SongRow(
                             song = song,
                             playing = current?.id == song.id,
@@ -258,11 +389,25 @@ fun SearchScreen(
                             onClick = {
                                 recents = saveRecentSearch(context, query)
                                 focusManager.clearFocus()
-                                onPlay(results, index)
+                                onPlay(song, false)
                             },
                             onFav = { onToggleFav(song) },
-                            onLong = { onLong(song) }
+                            onLong = { onLong(song) },
+                            onPlayNext = { onPlayNext(song) },
+                            onAddToQueue = { onAddToQueue(song) },
+                            onEditInfo = { onEditInfo(song) }
                         )
+                    }
+                    item {
+                        Row(
+                            Modifier.fillMaxWidth().clickable { online = true }
+                                .padding(horizontal = 20.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            GlyphIcon(Glyph.Search, p.accent, Modifier.size(16.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Text("Search \"${query.trim()}\" online", fontSize = 16.sp, color = p.accent, maxLines = 1)
+                        }
                     }
                 }
             }

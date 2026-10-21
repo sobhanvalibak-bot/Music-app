@@ -29,14 +29,19 @@ fun shareSongCard(context: Context, song: Song) {
     Thread {
         try {
             val cover = MusicWidget.loadCover(
-                app, song.id.toString(), song.uri, ContentUris.withAppendedId(albumArtBase, song.albumId)
+                app, song.id.toString(),
+                if (song.isOnline) null else song.uri,
+                if (song.isOnline) song.artUrl?.let { android.net.Uri.parse(it) }
+                else ContentUris.withAppendedId(albumArtBase, song.albumId)
             )
             val card = drawNowPlayingCard(song, cover)
             val dir = File(app.cacheDir, "share").apply { mkdirs() }
             val file = File(dir, "now_playing.png")
             FileOutputStream(file).use { card.compress(Bitmap.CompressFormat.PNG, 100, it) }
             val uri = FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", file)
-            val text = "${song.title} — ${song.artist}" + if (song.album.isNotBlank()) "\n${song.album}" else ""
+            val text = "${song.title} — ${song.artist}" +
+                if (song.remoteId != null) "\nhttps://youtu.be/${song.remoteId}"
+                else if (song.album.isNotBlank()) "\n${song.album}" else ""
             Handler(Looper.getMainLooper()).post {
                 try {
                     val send = Intent(Intent.ACTION_SEND).apply {

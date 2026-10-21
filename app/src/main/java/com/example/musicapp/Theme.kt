@@ -204,9 +204,22 @@ private fun loadEmbedded(context: Context, song: Song, px: Int): Bitmap? {
     }
 }
 
+/** Cover of an online song: the video's thumbnail. */
+private fun loadRemoteArt(url: String): Bitmap? {
+    val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+    c.connectTimeout = 15000
+    c.readTimeout = 15000
+    return try {
+        c.inputStream.use { BitmapFactory.decodeStream(it) }
+    } finally {
+        c.disconnect()
+    }
+}
+
 private suspend fun loadArt(context: Context, song: Song, px: Int): ImageBitmap? =
     withContext(Dispatchers.IO) {
         try {
+            if (song.isOnline) return@withContext song.artUrl?.let { loadRemoteArt(it)?.asImageBitmap() }
             val customCover = File(context.filesDir, "auto_cover_${song.id}.jpg")
             val bmp = (if (customCover.exists()) BitmapFactory.decodeFile(customCover.absolutePath) else null)
                 ?: loadEmbedded(context, song, px) ?: if (Build.VERSION.SDK_INT >= 29) {
