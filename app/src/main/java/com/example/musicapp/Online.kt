@@ -16,6 +16,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
@@ -264,6 +265,63 @@ object OnlineEngine {
         throw IOException("Could not read this Spotify link")
     }
 
+    /** One downloadable audio file: its address, file extension and mime type. */
+    class AudioSource(val url: String, val ext: String, val mime: String)
+
+    private val probeClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .build()
+
+    /** Forget the saved address of a page (after a playback error), so the next try asks again. */
+    fun forget(pageUrl: String) {
+        urlCache.remove("$pageUrl|true")
+        urlCache.remove("$pageUrl|false")
+    }
+
+    /**
+     * Asks the server for the first two bytes. Returns null when the address works, else the problem.
+     * An address that answers 403 (expired / blocked) is skipped instead of being handed to the player.
+     */
+    private fun probe(url: String): String? {
+        return try {
+            val req = Request.Builder().url(url).get()
+                .header("User-Agent", USER_AGENT)
+                .header("Range", "bytes=0-1")
+                .build()
+            probeClient.newCall(req).execute().use { r ->
+                if (r.code == 200 || r.code == 206) null else "HTTP ${r.code}"
+            }
+        } catch (e: IOException) {
+            e.message ?: "network error"
+        }
+    }
+
+    private fun friendly(e: Exception): String {
+        val m = e.message.orEmpty()
+        return when {
+            m.contains("Sign in", true) || m.contains("not a bot", true) ->
+                "YouTube asked to confirm you are not a bot. Try again in a few minutes or use another source."
+            m.contains("age", true) && m.contains("restrict", true) -> "This video is age restricted"
+            m.contains("not available", true) || m.contains("unavailable", true) -> "This video is not available"
+            m.contains("Unable to resolve host", true) || m.contains("timeout", true) -> "No internet connection"
+            m.isBlank() -> "Could not load this song"
+            else -> m.take(120)
+        }
+    }
+
+    /** Progressive audio streams of a page, best first (m4a before the rest, then by bitrate). */
+    private fun audioCandidates(info: StreamInfo): List<org.schabi.newpipe.extractor.stream.AudioStream> {
+        val audio = info.audioStreams.filter {
+            it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP && !it.content.isNullOrBlank()
+        }
+        return audio.sortedWith(
+            compareByDescending<org.schabi.newpipe.extractor.stream.AudioStream> { it.format == MediaFormat.M4A }
+                .thenByDescending { it.averageBitrate }
+        )
+    }
+
     /** Blocking: a playable address for the video (audio only, or picture + sound with [video]). */
     @Throws(IOException::class)
     fun streamUrl(pageUrl: String, video: Boolean): String {
@@ -273,26 +331,73 @@ object OnlineEngine {
         try {
             ensureInit()
             val info = StreamInfo.getInfo(pageUrl)
-            var url: String? = null
+            val tried = mutableListOf<String>()
+            var found: String? = null
+
+            fun accept(url: String?): Boolean {
+                if (url.isNullOrBlank()) return false
+                val problem = probe(url)
+                if (problem == null) {
+                    found = url
+                    return true
+                }
+                tried += problem
+                return false
+            }
+
             if (video && pageUrl.contains("youtube.com")) {
                 // a stream that already has sound in it (usually 360p; sometimes 720p)
-                url = info.videoStreams
+                val withSound = info.videoStreams
                     .filter { !it.isVideoOnly && it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
-                    .maxByOrNull { it.height }?.content
+                    .sortedByDescending { it.height }
+                for (v in withSound) if (accept(v.content)) break
             }
-            if (url == null) {
-                val audio = info.audioStreams.filter { it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
-                // m4a first: it seeks reliably
-                url = (audio.filter { it.format == MediaFormat.M4A }.maxByOrNull { it.averageBitrate }
-                    ?: audio.maxByOrNull { it.averageBitrate })?.content
+            if (found == null) {
+                for (a in audioCandidates(info).take(4)) if (accept(a.content)) break
             }
-            if (url.isNullOrBlank()) throw IOException("No playable stream found for this video")
+            val url = found
+            if (url.isNullOrBlank()) {
+                throw IOException(
+                    if (tried.isEmpty()) "No playable stream found for this song"
+                    else "The server refused the stream (${tried.last()})"
+                )
+            }
             urlCache[key] = url to (now + URL_TTL_MS)
             return url
         } catch (e: IOException) {
             throw e
         } catch (e: Exception) {
-            throw IOException(e.message ?: "Could not load this video", e)
+            throw IOException(friendly(e), e)
+        }
+    }
+
+    /** Blocking: the best audio file of a page, to save on the device. */
+    @Throws(IOException::class)
+    fun audioSource(pageUrl: String): AudioSource {
+        try {
+            ensureInit()
+            val info = StreamInfo.getInfo(pageUrl)
+            val tried = mutableListOf<String>()
+            for (a in audioCandidates(info).take(4)) {
+                val url = a.content ?: continue
+                val problem = probe(url)
+                if (problem != null) { tried += problem; continue }
+                val fmt: MediaFormat? = a.format
+                val ext: String
+                val mime: String
+                if (fmt == null || fmt == MediaFormat.M4A) { ext = "m4a"; mime = "audio/mp4" }
+                else if (fmt == MediaFormat.MP3) { ext = "mp3"; mime = "audio/mpeg" }
+                else { ext = fmt.suffix; mime = fmt.mimeType }
+                return AudioSource(url, ext, mime)
+            }
+            throw IOException(
+                if (tried.isEmpty()) "No downloadable audio found for this song"
+                else "The server refused the file (${tried.last()})"
+            )
+        } catch (e: IOException) {
+            throw e
+        } catch (e: Exception) {
+            throw IOException(friendly(e), e)
         }
     }
 }

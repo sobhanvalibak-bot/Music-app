@@ -371,6 +371,7 @@ fun SearchScreen(
                                     onLong = { onLong(song) },
                                     onPlayNext = { onPlayNext(song) },
                                     onAddToQueue = { onAddToQueue(song) },
+                                    onDownload = { OnlineDownloader.start(context, song) },
                                     onWatch = if (!song.canWatch) null else ({
                                         recents = saveRecentSearch(context, query)
                                         focusManager.clearFocus()

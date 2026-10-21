@@ -273,7 +273,7 @@ fun MusicApp(
         return
     }
 
-    val songs = remember(songsVersion) { loadSongs(context) }
+    val songs = remember(songsVersion, OnlineDownloader.version) { loadSongs(context) }
     remember { OnlineRegistry.init(context) } // online songs saved earlier (favorites, playlists, recent)
     // songs on the device plus the online songs the app has seen
     val byId: Map<Long, Song> = remember(songs) { SongIndex(songs.associateBy { it.id }) }
@@ -317,6 +317,7 @@ fun MusicApp(
     var currentWindow by remember { mutableIntStateOf(-1) }
     // true while the current (online) song is playing with its picture
     var hasVideo by remember { mutableStateOf(false) }
+    var onlineRetryId by remember { mutableStateOf<Long?>(null) }
 
     DisposableEffect(Unit) {
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
@@ -353,13 +354,27 @@ fun MusicApp(
                     hasVideo = tracks.isTypeSelected(C.TRACK_TYPE_VIDEO)
                 }
                 override fun onPlayerError(error: PlaybackException) {
-                    // an online song that cannot be loaded (no internet, removed video ...): say so and go on
-                    if (current?.isOnline == true) {
-                        Toast.makeText(context, "Could not play this online song", Toast.LENGTH_SHORT).show()
-                        if (c.hasNextMediaItem()) { c.seekToNextMediaItem(); c.prepare(); c.play() }
+                    // an online song that cannot be loaded: try once more with a fresh stream address,
+                    // then say what went wrong. It never jumps to a song from the phone by itself.
+                    val song = current
+                    if (song?.isOnline == true) {
+                        val page = song.remoteId.orEmpty()
+                        if (onlineRetryId != song.id) {
+                            onlineRetryId = song.id
+                            Thread { OnlineEngine.forget(page) }.start()
+                            c.prepare()
+                            c.play()
+                        } else {
+                            onlineRetryId = null
+                            val reason = generateSequence<Throwable>(error) { it.cause }
+                                .map { it.message.orEmpty() }
+                                .firstOrNull { it.isNotBlank() && !it.startsWith("Source error") && !it.startsWith("androidx.media3") }
+                                ?: "Could not play this online song"
+                            Toast.makeText(context, reason.take(140), Toast.LENGTH_LONG).show()
+                        }
                     }
                 }
-                override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+                override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing; if (playing) onlineRetryId = null }
                 override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
                     shuffle = shuffleModeEnabled
                     queue = buildQueue(c, byId)
@@ -1001,13 +1016,19 @@ fun MusicApp(
                                     ) { favWithHaptic(menuSong.id); islandMenu = false },
                                     MenuAction("Add to playlist", Glyph.PlusCircle) { addTarget = menuSong; islandMenu = false }
                                 ),
-                                listOf(
-                                    MenuAction("Edit info", Glyph.Edit) { if (!menuSong.isOnline) editTarget = menuSong; islandMenu = false },
-                                    MenuAction("Share", Glyph.Share) {
+                                buildList<MenuAction> {
+                                    if (menuSong.isOnline) {
+                                        add(MenuAction("Download", Glyph.Download) {
+                                            islandMenu = false
+                                            OnlineDownloader.start(context, menuSong)
+                                        })
+                                    }
+                                    add(MenuAction("Edit info", Glyph.Edit) { if (!menuSong.isOnline) editTarget = menuSong; islandMenu = false })
+                                    add(MenuAction("Share", Glyph.Share) {
                                         islandMenu = false
                                         shareSong(context, menuSong)
-                                    }
-                                ),
+                                    })
+                                },
                                 listOf(
                                     MenuAction(
                                         when {

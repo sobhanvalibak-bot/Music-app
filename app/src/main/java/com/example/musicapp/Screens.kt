@@ -134,6 +134,7 @@ fun SongRow(
     onEditInfo: (() -> Unit)? = null,
     onAddToQueue: (() -> Unit)? = null,
     onWatch: (() -> Unit)? = null,
+    onDownload: (() -> Unit)? = null,
     dragModifier: Modifier? = null
 ) {
     var sheetOpen by remember(song.id) { mutableStateOf(false) }
@@ -216,6 +217,25 @@ fun SongRow(
                     .padding(horizontal = 9.dp, vertical = 5.dp)
             ) { Text("Video", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = p.accent) }
         }
+        if (onDownload != null) {
+            // online songs: save the song on the phone (round progress while it downloads)
+            val dl = OnlineDownloader.progress[song.id]
+            Box(
+                Modifier.size(36.dp).clip(CircleShape).clickable { onDownload() },
+                contentAlignment = Alignment.Center
+            ) {
+                when {
+                    dl == null -> GlyphIcon(Glyph.Download, p.secondary, Modifier.size(20.dp))
+                    dl >= 1f -> Text("\u2713", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = p.accent)
+                    else -> androidx.compose.material3.CircularProgressIndicator(
+                        progress = { dl.coerceAtLeast(0.04f) },
+                        modifier = Modifier.size(20.dp),
+                        color = p.accent,
+                        strokeWidth = 2.5.dp
+                    )
+                }
+            }
+        }
         Box {
             IconButton(onClick = { openMenu() }, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Default.MoreVert, contentDescription = "Song options", tint = p.secondary)
@@ -230,6 +250,7 @@ fun SongRow(
                     onPlayNext = onPlayNext,
                     onAddToQueue = onAddToQueue,
                     onWatch = onWatch,
+                    onDownload = onDownload,
                     onAddToPlaylist = onLong,
                     onEditInfo = if (song.isOnline) null else onEditInfo,
                     onRemove = onRemove,

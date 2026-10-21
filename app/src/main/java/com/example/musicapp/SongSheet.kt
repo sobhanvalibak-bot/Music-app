@@ -284,7 +284,8 @@ fun SongActionSheet(
     onRemove: (() -> Unit)?,
     anchor: Rect? = null,
     onAddToQueue: (() -> Unit)? = null,
-    onWatch: (() -> Unit)? = null
+    onWatch: (() -> Unit)? = null,
+    onDownload: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val red = Color(0xFFFF3B30)
@@ -326,6 +327,7 @@ fun SongActionSheet(
                     )
                 },
                 buildList<MenuAction> {
+                    if (onDownload != null) add(MenuAction("Download", Glyph.Download) { close { onDownload() } })
                     if (onEditInfo != null) add(MenuAction("Edit info", Glyph.Edit) { close { onEditInfo() } })
                     add(MenuAction("Share", Glyph.Share) { close { shareSong(context, song) } })
                 },

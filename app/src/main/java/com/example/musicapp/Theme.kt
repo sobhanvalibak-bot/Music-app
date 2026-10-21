@@ -282,7 +282,7 @@ fun Cover(
 
 // ───────────────────────── Icons (drawn, no extra deps) ─────────────────────────
 
-enum class Glyph { Note, Album, Artist, Tune, Play, Pause, Next, Heart, HeartOutline, Back, Close, Plus, Prev, Shuffle, Repeat, ChevronDown, Edit, Search, Queue, Share, More, PlusCircle, Speaker, Moon, Volume }
+enum class Glyph { Note, Album, Artist, Tune, Play, Pause, Next, Heart, HeartOutline, Back, Close, Plus, Prev, Shuffle, Repeat, ChevronDown, Edit, Search, Queue, Share, More, PlusCircle, Speaker, Moon, Volume, Download }
 
 @Composable
 fun GlyphIcon(glyph: Glyph, color: Color, modifier: Modifier = Modifier) {
@@ -452,6 +452,13 @@ fun GlyphIcon(glyph: Glyph, color: Color, modifier: Modifier = Modifier) {
                 drawCircle(color, w * 0.13f, a, style = Stroke(sw))
                 drawCircle(color, w * 0.13f, b, style = Stroke(sw))
                 drawCircle(color, w * 0.13f, c, style = Stroke(sw))
+            }
+            Glyph.Download -> {
+                val sw = w * 0.09f
+                drawLine(color, Offset(w * 0.5f, h * 0.12f), Offset(w * 0.5f, h * 0.64f), sw, StrokeCap.Round)
+                drawLine(color, Offset(w * 0.27f, h * 0.42f), Offset(w * 0.5f, h * 0.65f), sw, StrokeCap.Round)
+                drawLine(color, Offset(w * 0.73f, h * 0.42f), Offset(w * 0.5f, h * 0.65f), sw, StrokeCap.Round)
+                drawLine(color, Offset(w * 0.18f, h * 0.88f), Offset(w * 0.82f, h * 0.88f), sw, StrokeCap.Round)
             }
             Glyph.More -> {
                 drawCircle(color, w * 0.075f, Offset(w * 0.5f, h * 0.2f))
