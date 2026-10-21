@@ -334,6 +334,14 @@ object OnlineEngine {
                 }
             }
         }
+        // "Could not get any stream" hides the real reason: ask the extractor directly and log what it says
+        try {
+            val ex = NewPipe.getServiceByUrl(pageUrl).getStreamExtractor(pageUrl)
+            ex.fetchPage()
+            AppLog.w("resolve", "direct check: ${ex.audioStreams.size} audio streams, ${ex.videoStreams.size} video streams")
+        } catch (t: Throwable) {
+            AppLog.e("resolve", "real reason: ${t.javaClass.simpleName}: ${t.message}", t)
+        }
         throw last ?: IOException("Could not load this song")
     }
 
@@ -378,6 +386,8 @@ object OnlineEngine {
             m.contains("age", true) && m.contains("restrict", true) -> "This video is age restricted"
             m.contains("not available", true) || m.contains("unavailable", true) -> "This video is not available"
             m.contains("Unable to resolve host", true) || m.contains("timeout", true) -> "No internet connection"
+            m.contains("Could not get any stream", true) ->
+                "No playable stream for this song (SoundCloud serves it only in a protected form). Try another upload of it."
             m.isBlank() -> "Could not load this song"
             else -> m.take(120)
         }

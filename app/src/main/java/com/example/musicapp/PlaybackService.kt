@@ -121,6 +121,19 @@ class PlaybackService : MediaSessionService() {
                 }
             }
 
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) {
+                if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SKIP) {
+                    AppLog.i(
+                        "service",
+                        "jump ${oldPosition.mediaItemIndex}@${oldPosition.positionMs} -> ${newPosition.mediaItemIndex}@${newPosition.positionMs} (reason $reason, fading=$fading)"
+                    )
+                }
+            }
+
             override fun onAudioSessionIdChanged(audioSessionId: Int) {
                 publishAudioSession(audioSessionId)
             }
@@ -176,10 +189,16 @@ class PlaybackService : MediaSessionService() {
         val x = prefs.getInt("crossfade", 0) * 1000L
         if (x <= 0L || SleepTimer.afterTrack) return
         if (p.repeatMode == Player.REPEAT_MODE_ONE || !p.hasNextMediaItem()) return
+        val item = p.currentMediaItem ?: return
+        // Online songs (HLS / just-in-time resolved streams) report unreliable durations while loading,
+        // and the helper player cannot preload them cheaply: never crossfade out of them.
+        if ((item.mediaId.toLongOrNull() ?: 0L) < 0L) return
+        if (p.playbackState != Player.STATE_READY) return
         val dur = p.duration
         if (dur == C.TIME_UNSET || dur < x * 2 + 2000L) return
-        val item = p.currentMediaItem ?: return
         val pos = p.currentPosition
+        // a song that has only just started can never be at its end
+        if (pos < 3000L) return
         val remaining = dur - pos
         // load the end of this song into the helper player a little early so it starts instantly
         if (remaining <= x + 2500L && remaining > x) preloadTail(p, item, dur - x)
@@ -224,6 +243,7 @@ class PlaybackService : MediaSessionService() {
         t.volume = 1f
         t.playWhenReady = true
 
+        AppLog.i("crossfade", "fade out of ${item.mediaMetadata.title} at $pos ms, $remaining ms left")
         fading = true
         fadeElapsed = 0L
         fadeTotal = remaining.coerceAtLeast(200L)
