@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.musicapp"
         minSdk = 24
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
     }
     // One fixed key for every build, so a new APK installs over the old one (an update)
     // and keeps the app's data instead of failing with a signature conflict.
