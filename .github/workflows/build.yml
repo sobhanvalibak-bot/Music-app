@@ -1,0 +1,45 @@
+name: Build APK
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+      - name: Find the project folder
+        id: p
+        run: |
+          f=$(find . -name settings.gradle.kts -not -path "./.git/*" | head -n1)
+          if [ -z "$f" ]; then
+            z=$(find . -name "*.zip" -not -path "./.git/*" | head -n1)
+            if [ -n "$z" ]; then
+              mkdir -p _unzipped && unzip -q "$z" -d _unzipped
+              f=$(find _unzipped -name settings.gradle.kts | head -n1)
+            fi
+          fi
+          if [ -z "$f" ]; then
+            echo "settings.gradle.kts not found. Files in the repo:"
+            find . -maxdepth 3 -not -path "./.git/*"
+            exit 1
+          fi
+          echo "dir=$(dirname "$f")" >> "$GITHUB_OUTPUT"
+      - name: Build
+        working-directory: ${{ steps.p.outputs.dir }}
+        run: gradle assembleDebug
+      - name: Collect the APK
+        run: |
+          mkdir -p out
+          apk=$(find "${{ steps.p.outputs.dir }}/app/build/outputs/apk/debug" -name "*.apk" | head -n1)
+          cp "$apk" out/MusicApp.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MusicApp
+          path: out/MusicApp.apk
