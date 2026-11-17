@@ -1,5 +1,5 @@
 
-name: Build APK and Release
+name: Build APK and Auto Release
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: musicapp-build-release
+  group: musicapp-release
   cancel-in-progress: false
 
 jobs:
@@ -17,141 +17,152 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      # 1. دریافت مخزن
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Java
+      # 2. نصب Java
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle cache
+      # 3. نصب Gradle 8.13
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
 
-      - name: Find the project folder
+      # 4. پیدا کردن پروژه
+      - name: Find Project Folder
         id: project
         shell: bash
         run: |
           set -euo pipefail
 
-          project_file=$(find . -name settings.gradle.kts \
+          f=$(find . \
+            -name settings.gradle.kts \
             -not -path './.git/*' \
-            -not -path './_unzipped/*' | head -n 1 || true)
+            -not -path './_unzipped/*' \
+            | head -n 1 || true)
 
-          if [ -z "$project_file" ]; then
-            zip_file=$(find . -name '*.zip' \
+          if [ -z "$f" ]; then
+            z=$(find . \
+              -name '*.zip' \
               -not -path './.git/*' \
-              -not -path './_unzipped/*' | head -n 1 || true)
+              -not -path './_unzipped/*' \
+              | head -n 1 || true)
 
-            if [ -n "$zip_file" ]; then
+            if [ -n "$z" ]; then
               mkdir -p _unzipped
-              unzip -oq "$zip_file" -d _unzipped
-              project_file=$(find _unzipped \
-                -name settings.gradle.kts | head -n 1 || true)
+              unzip -oq "$z" -d _unzipped
+
+              f=$(find _unzipped \
+                -name settings.gradle.kts \
+                | head -n 1 || true)
             fi
           fi
 
-          if [ -z "$project_file" ]; then
-            echo "ERROR: settings.gradle.kts not found."
+          if [ -z "$f" ]; then
+            echo "Project not found!"
+            find . -maxdepth 4 -type f
             exit 1
           fi
 
-          project_dir=$(dirname "$project_file")
-          echo "dir=$project_dir" >> "$GITHUB_OUTPUT"
+          dir=$(dirname "$f")
 
-      - name: Calculate next version (+0.1)
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+          echo "Project directory: $dir"
+
+      # 5. بررسی Gradle
+      - name: Verify Gradle
+        run: |
+          gradle --version
+
+      # 6. محاسبه نسخه جدید
+      - name: Calculate Version
         id: version
-        working-directory: ${{ steps.project.outputs.dir }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
 
-          latest_tag=$(gh release list \
+          latest=$(gh release list \
             --limit 1 \
             --json tagName \
             --jq '.[0].tagName' 2>/dev/null || true)
 
-          if [ -n "$latest_tag" ] && [ "$latest_tag" != "null" ]; then
-            current=${latest_tag#v}
-            current=${current#V}
-            IFS='.' read -r major minor patch <<< "$current"
+          if [ -z "$latest" ] || [ "$latest" = "null" ]; then
+            major=1
+            minor=4
           else
-            current=$(grep -E 'versionName[[:space:]]*=' \
-              app/build.gradle.kts | head -n 1 |
-              sed -E 's/.*"([0-9]+\.[0-9]+)(\.[0-9]+)?".*/\1/')
+            latest=${latest#v}
+            latest=${latest#V}
 
-            IFS='.' read -r major minor <<< "$current"
-          fi
+            IFS='.' read -r major minor patch <<< "$latest"
 
-          if ! [[ "${major:-}" =~ ^[0-9]+$ && "${minor:-}" =~ ^[0-9]+$ ]]; then
-            echo "Invalid previous version: ${current:-unknown}"
-            exit 1
+            if ! [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ ]]; then
+              echo "Invalid version: $latest"
+              exit 1
+            fi
           fi
 
           minor=$((minor + 1))
 
+          if [ "$minor" -ge 10 ]; then
+            major=$((major + 1))
+            minor=0
+          fi
+
           version="${major}.${minor}"
-          version_code=$((major * 100000 + minor * 1000))
+          tag="v${version}"
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-          echo "Next version: $version"
+          echo "Next release: $tag"
 
-      - name: Check Gradle Wrapper
+      # 7. ساخت APK
+      - name: Build APK
         working-directory: ${{ steps.project.outputs.dir }}
-        shell: bash
         run: |
           set -euo pipefail
 
-          if [ ! -f ./gradlew ]; then
-            echo "Gradle Wrapper is missing!"
-            exit 1
-          fi
+          gradle assembleDebug
 
-          chmod +x ./gradlew
-
-          grep '^distributionUrl=' \
-            gradle/wrapper/gradle-wrapper.properties
-
-          ./gradlew --version
-
-      - name: Build debug APK
-        working-directory: ${{ steps.project.outputs.dir }}
-        env:
-          APP_VERSION: ${{ steps.version.outputs.version }}
-          APP_VERSION_CODE: ${{ steps.version.outputs.version_code }}
-        run: |
-          ./gradlew assembleDebug \
-            -PappVersionName="$APP_VERSION" \
-            -PappVersionCode="$APP_VERSION_CODE"
-
+      # 8. بررسی و جمع آوری APK
       - name: Collect APK
-        shell: bash
         env:
           PROJECT_DIR: ${{ steps.project.outputs.dir }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
         run: |
           set -euo pipefail
 
           mkdir -p out
 
           apk=$(find "$PROJECT_DIR/app/build/outputs/apk/debug" \
-            -type f -name '*.apk' | head -n 1 || true)
+            -type f \
+            -name '*.apk' \
+            | head -n 1 || true)
 
           if [ -z "$apk" ]; then
-            echo "APK was not generated!"
+            echo "APK not found!"
             exit 1
           fi
 
-          cp "$apk" "out/MusicApp-${{ steps.version.outputs.version }}.apk"
+          cp "$apk" "out/MusicApp-${VERSION}.apk"
+
           cp "$apk" out/MusicApp.apk
 
+          echo "APK successfully collected:"
           ls -lh out/
 
-      - name: Upload build artifact
+      # 9. ذخیره APK به عنوان Artifact
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: MusicApp-${{ steps.version.outputs.version }}
@@ -159,19 +170,39 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # 10. ساخت GitHub Release
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          tag_name: v${{ steps.version.outputs.version }}
-          name: MusicApp v${{ steps.version.outputs.version }}
-          body: |
-            ## MusicApp v${{ steps.version.outputs.version }}
 
-            Automatically generated from a successful build.
+          tag_name: ${{ steps.version.outputs.tag }}
+
+          name: MusicApp ${{ steps.version.outputs.tag }}
+
+          body: |
+            # MusicApp ${{ steps.version.outputs.tag }}
+
+            New automatic build.
+
+            Version: ${{ steps.version.outputs.version }}
+
+            Build: Successful
 
             APK: MusicApp-${{ steps.version.outputs.version }}.apk
-          files: out/MusicApp-${{ steps.version.outputs.version }}.apk
+
+          files: |
+            out/MusicApp-${{ steps.version.outputs.version }}.apk
+
           draft: false
           prerelease: false
           make_latest: true
+
+      # 11. پایان موفق
+      - name: Build Summary
+        if: success()
+        run: |
+          echo "## MusicApp Build Successful" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: ${{ steps.version.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Release: ${{ steps.version.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- APK uploaded successfully" >> "$GITHUB_STEP_SUMMARY"
