@@ -1,45 +1,177 @@
-name: Build APK
+
+name: Build APK and Release
+
 on:
   push:
   workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: musicapp-build-release
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 8.9
+          java-version: '17'
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Find the project folder
-        id: p
+        id: project
+        shell: bash
         run: |
-          f=$(find . -name settings.gradle.kts -not -path "./.git/*" | head -n1)
-          if [ -z "$f" ]; then
-            z=$(find . -name "*.zip" -not -path "./.git/*" | head -n1)
-            if [ -n "$z" ]; then
-              mkdir -p _unzipped && unzip -q "$z" -d _unzipped
-              f=$(find _unzipped -name settings.gradle.kts | head -n1)
+          set -euo pipefail
+
+          project_file=$(find . -name settings.gradle.kts \
+            -not -path './.git/*' \
+            -not -path './_unzipped/*' | head -n 1 || true)
+
+          if [ -z "$project_file" ]; then
+            zip_file=$(find . -name '*.zip' \
+              -not -path './.git/*' \
+              -not -path './_unzipped/*' | head -n 1 || true)
+
+            if [ -n "$zip_file" ]; then
+              mkdir -p _unzipped
+              unzip -oq "$zip_file" -d _unzipped
+              project_file=$(find _unzipped \
+                -name settings.gradle.kts | head -n 1 || true)
             fi
           fi
-          if [ -z "$f" ]; then
-            echo "settings.gradle.kts not found. Files in the repo:"
-            find . -maxdepth 3 -not -path "./.git/*"
+
+          if [ -z "$project_file" ]; then
+            echo "ERROR: settings.gradle.kts not found."
             exit 1
           fi
-          echo "dir=$(dirname "$f")" >> "$GITHUB_OUTPUT"
-      - name: Build
-        working-directory: ${{ steps.p.outputs.dir }}
-        run: gradle assembleDebug
-      - name: Collect the APK
+
+          project_dir=$(dirname "$project_file")
+          echo "dir=$project_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Calculate next version (+0.1)
+        id: version
+        working-directory: ${{ steps.project.outputs.dir }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
+          set -euo pipefail
+
+          latest_tag=$(gh release list \
+            --limit 1 \
+            --json tagName \
+            --jq '.[0].tagName' 2>/dev/null || true)
+
+          if [ -n "$latest_tag" ] && [ "$latest_tag" != "null" ]; then
+            current=${latest_tag#v}
+            current=${current#V}
+            IFS='.' read -r major minor patch <<< "$current"
+          else
+            current=$(grep -E 'versionName[[:space:]]*=' \
+              app/build.gradle.kts | head -n 1 |
+              sed -E 's/.*"([0-9]+\.[0-9]+)(\.[0-9]+)?".*/\1/')
+
+            IFS='.' read -r major minor <<< "$current"
+          fi
+
+          if ! [[ "${major:-}" =~ ^[0-9]+$ && "${minor:-}" =~ ^[0-9]+$ ]]; then
+            echo "Invalid previous version: ${current:-unknown}"
+            exit 1
+          fi
+
+          minor=$((minor + 1))
+
+          version="${major}.${minor}"
+          version_code=$((major * 100000 + minor * 1000))
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+
+          echo "Next version: $version"
+
+      - name: Check Gradle Wrapper
+        working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f ./gradlew ]; then
+            echo "Gradle Wrapper is missing!"
+            exit 1
+          fi
+
+          chmod +x ./gradlew
+
+          grep '^distributionUrl=' \
+            gradle/wrapper/gradle-wrapper.properties
+
+          ./gradlew --version
+
+      - name: Build debug APK
+        working-directory: ${{ steps.project.outputs.dir }}
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+          APP_VERSION_CODE: ${{ steps.version.outputs.version_code }}
+        run: |
+          ./gradlew assembleDebug \
+            -PappVersionName="$APP_VERSION" \
+            -PappVersionCode="$APP_VERSION_CODE"
+
+      - name: Collect APK
+        shell: bash
+        env:
+          PROJECT_DIR: ${{ steps.project.outputs.dir }}
+        run: |
+          set -euo pipefail
+
           mkdir -p out
-          apk=$(find "${{ steps.p.outputs.dir }}/app/build/outputs/apk/debug" -name "*.apk" | head -n1)
+
+          apk=$(find "$PROJECT_DIR/app/build/outputs/apk/debug" \
+            -type f -name '*.apk' | head -n 1 || true)
+
+          if [ -z "$apk" ]; then
+            echo "APK was not generated!"
+            exit 1
+          fi
+
+          cp "$apk" "out/MusicApp-${{ steps.version.outputs.version }}.apk"
           cp "$apk" out/MusicApp.apk
-      - uses: actions/upload-artifact@v4
+
+          ls -lh out/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: MusicApp
-          path: out/MusicApp.apk
+          name: MusicApp-${{ steps.version.outputs.version }}
+          path: out/MusicApp-${{ steps.version.outputs.version }}.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: v${{ steps.version.outputs.version }}
+          name: MusicApp v${{ steps.version.outputs.version }}
+          body: |
+            ## MusicApp v${{ steps.version.outputs.version }}
+
+            Automatically generated from a successful build.
+
+            APK: MusicApp-${{ steps.version.outputs.version }}.apk
+          files: out/MusicApp-${{ steps.version.outputs.version }}.apk
+          draft: false
+          prerelease: false
+          make_latest: true
